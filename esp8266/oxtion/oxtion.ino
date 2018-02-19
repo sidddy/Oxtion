@@ -40,16 +40,43 @@ NexVariable nx_temp_ext_ti = NexVariable(2,21,"temp.temp_ext_ti");
 NexVariable nx_temp_ext_to = NexVariable(2,22,"temp.temp_ext_to");
 NexHotspot nx_temp_update = NexHotspot(2,24,"update");
 
+// Move page
+NexButton nx_move_home = NexButton(3,9,"b5");
+NexButton nx_move_home_x = NexButton(3,10,"b6");
+NexButton nx_move_home_y = NexButton(3,11,"b7");
+NexButton nx_move_home_z = NexButton(3,12,"b8");
+NexButton nx_move_x_u = NexButton(3,16,"b12");
+NexButton nx_move_x_d = NexButton(3,14,"b10");
+NexButton nx_move_y_u = NexButton(3,13,"b9");
+NexButton nx_move_y_d = NexButton(3,15,"b11");
+NexButton nx_move_z_u = NexButton(3,17,"b13");
+NexButton nx_move_z_d = NexButton(3,18,"b14");
+
+NexDSButton nx_move_0_1 = NexDSButton(3,6,"bt0");
+NexDSButton nx_move_1 = NexDSButton(3,7,"bt1");
+NexDSButton nx_move_10 = NexDSButton(3,8,"bt2");
+
+
 NexTouch *nex_listen_list[] = 
 {
     &nx_temp_update,
+    &nx_move_home,
+    &nx_move_home_x,
+    &nx_move_home_y,
+    &nx_move_home_z,
+    &nx_move_x_u,
+    &nx_move_x_d,
+    &nx_move_y_u,
+    &nx_move_y_d,
+    &nx_move_z_u,
+    &nx_move_z_d,
     NULL
 };
 
 Tasker octoTasker(false);
 
 // Open connection to the HTTP server
-bool connect(const char* hostName) {
+bool connectAPI(const char* hostName) {
     Debug.print("Connect to ");
     Debug.println(hostName);
     
@@ -61,7 +88,7 @@ bool connect(const char* hostName) {
 }
 
 // Send the HTTP GET request to the server
-bool sendRequest(const char* host, const char* resource) {
+bool sendAPIRequest(const char* host, const char* resource) {
     Debug.print("GET ");
     Debug.println(resource);
     
@@ -79,7 +106,7 @@ bool sendRequest(const char* host, const char* resource) {
 }
 
 // Send the HTTP GET request to the server
-bool postCommand(const char* host, const char* resource, const char* content) {
+bool postAPICommand(const char* host, const char* resource, const char* content) {
     char outBuf[128];
   
     Debug.print("POST ");
@@ -104,7 +131,7 @@ bool postCommand(const char* host, const char* resource, const char* content) {
 }
 
 // Skip HTTP headers so that we are at the beginning of the response's body
-bool skipResponseHeaders() {
+bool skipAPIResponseHeaders() {
     // Check HTTP status
     char status[32] = {0};
     client.readBytesUntil('\r', status, sizeof(status));
@@ -153,12 +180,14 @@ void updateExtTemperatures(float act, float tar) {
 void updateBedTemperatures(float act, float tar) {
     if ((uint32)act != (uint32)temp_bed_act) {
       // change value on display
+        Debug.println("updateBedTemp act");
       nx_temp_bed_c.setValue((uint32)act);
     }
     temp_bed_act = act;
 
     if ((uint32)tar != (uint32)temp_bed_tar) {
       // change value on display
+        Debug.println("updateBedTemp tar");
       nx_temp_bed_ti.setValue((uint32)tar);
     }
     temp_bed_tar = tar;
@@ -181,7 +210,7 @@ void updateJobDetails(const char* file, float comp, int time, int time_left) {
     Debug.println(time_left);
 }
 
-bool readConnectionContent() {
+bool readAPIConnectionContent() {
     const size_t BUFFER_SIZE = 1024;
     
     // Allocate a temporary memory pool
@@ -207,7 +236,7 @@ bool readConnectionContent() {
     return true;
 }
 
-bool readPrinterContent() {
+bool readAPIPrinterContent() {
     const size_t BUFFER_SIZE = 1024;
     
     // Allocate a temporary memory pool
@@ -226,7 +255,7 @@ bool readPrinterContent() {
     return true;
 }
 
-bool readJobContent() {
+bool readAPIJobContent() {
     const size_t BUFFER_SIZE = 1024;
     
     // Allocate a temporary memory pool
@@ -248,43 +277,43 @@ bool readJobContent() {
     return true;
 }
 
-void disconnect() {
+void disconnectAPI() {
     //Debug.println("Disconnect");
     client.stop();
 }
 
-void getOctoConnectionState(int) {
-    if (connect(server)) {
-        if (sendRequest(server, "/api/connection") && skipResponseHeaders()) {
-            readConnectionContent();
+void getAPIConnectionState(int) {
+    if (connectAPI(server)) {
+        if (sendAPIRequest(server, "/api/connection") && skipAPIResponseHeaders()) {
+            readAPIConnectionContent();
         }
-        disconnect();
+        disconnectAPI();
     }
 }
 
-void getOctoPrinterState(int) {
+void getAPIPrinterState(int) {
     if (c_state != OCTO_STATE_OFFLINE) {
-        if (connect(server)) {
-            if (sendRequest(server, "/api/printer?history=false&exclude=state,sd") && skipResponseHeaders()) {
-                readPrinterContent();
+        if (connectAPI(server)) {
+            if (sendAPIRequest(server, "/api/printer?history=false&exclude=state,sd") && skipAPIResponseHeaders()) {
+                readAPIPrinterContent();
             }
-            disconnect();
+            disconnectAPI();
         }
     }
 }
 
-void getOctoJobState(int) {
+void getAPIJobState(int) {
     if (c_state != OCTO_STATE_OFFLINE) {
-        if (connect(server)) {
-            if (sendRequest(server, "/api/job") && skipResponseHeaders()) {
-                readJobContent();
+        if (connectAPI(server)) {
+            if (sendAPIRequest(server, "/api/job") && skipAPIResponseHeaders()) {
+                readAPIJobContent();
             }
-            disconnect();
+            disconnectAPI();
         }
     }
 }
 
-void variableCallback(void *ptr)
+void nxTemperatureCallback(void *ptr)
 {
   Debug.println("Variable callback executed!!");
   // some target temp changed (extruder or bed), retreive both values
@@ -301,23 +330,183 @@ void variableCallback(void *ptr)
   Debug.println(ext_t);
 
   if (ext_t != (uint32)temp_ext_tar) {
-    if (connect(server)) {
+      //updateExtTemperatures(ext_t,ext_t);
+    if (connectAPI(server)) {
       char jsonCmd[256];
       snprintf(jsonCmd, 256, "{\"command\": \"target\", \"targets\": { \"tool0\": %d } }", ext_t);
-      postCommand(server, "/api/printer/tool", jsonCmd);
-      disconnect();
+      postAPICommand(server, "/api/printer/tool", jsonCmd);
+      disconnectAPI();
     }
   }
   if (bed_t != (uint32)temp_bed_tar) {
-    if (connect(server)) {
+     // updateBedTemperatures(bed_t,bed_t);
+    if (connectAPI(server)) {
       char jsonCmd[256];
       snprintf(jsonCmd, 256, "{\"command\": \"target\", \"target\": %d }", bed_t);
-      postCommand(server, "/api/printer/bed", jsonCmd);
-      disconnect();
+      postAPICommand(server, "/api/printer/bed", jsonCmd);
+      disconnectAPI();
     }
   }
   
 }
+
+void nxHomeCallback(void *ptr) {
+    Debug.println("nxHomeCallback called.");
+    if (ptr == &nx_move_home) {
+        Debug.println("Home button pressed.");
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/printer/printhead", "{\"axes\":[\"x\",\"y\",\"z\"],\"command\":\"home\"}");
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_home_x) {
+        Debug.println("Home X button pressed.");
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/printer/printhead", "{\"axes\":[\"x\"],\"command\":\"home\"}");
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_home_y) {
+        Debug.println("Home Y button pressed.");
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/printer/printhead", "{\"axes\":[\"y\"],\"command\":\"home\"}");
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_home_z) {
+        Debug.println("Home Z button pressed.");
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/printer/printhead", "{\"axes\":[\"z\"],\"command\":\"home\"}");
+            disconnectAPI();
+        }
+    }
+}
+
+void nxMoveCallback(void *ptr) {
+    uint32 val;
+    char *step = NULL;
+    
+    Debug.println("nxMoveCallback called.");
+    
+    nx_move_0_1.getValue(&val);
+    if (val == 1) {
+        step = "0.1";
+    } else {
+        nx_move_1.getValue(&val);
+        if (val == 1) {
+            step = "1.0";
+        } else {
+            nx_move_10.getValue(&val);
+            if (val == 1) {
+                step = "10.0";
+            } else {
+                step = "0";
+            }
+        }
+    }
+    if (ptr == &nx_move_x_u) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("X Up button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"x\":%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_x_d) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("X Down button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"x\":-%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_y_u) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("Y Up button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"y\":%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_y_d) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("Y Down button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"y\":-%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_z_u) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("Z Up button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"z\":%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_z_d) {
+        //{"absolute":false,"y":-10,"command":"jog"}
+        Debug.println("Z Down button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"absolute\":false,\"z\":-%s,\"command\":\"jog\"}", step);
+            postAPICommand(server, "/api/printer/printhead", jsonCmd);
+            disconnectAPI();
+        }
+    }
+}
+
+void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+    const size_t BUFFER_SIZE = 1024;
+    
+    // Allocate a temporary memory pool
+    DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
+    
+    if ((!strcmp(topic, "octoprint/temperature/bed")) && (length < 60)) {
+        char buf[64];
+        memcpy(buf, payload, length);
+        buf[length] = '\0';
+
+        Debug.println(buf);
+    
+        JsonObject& root = jsonBuffer.parseObject(buf);
+        if (!root.success()) {
+            Debug.println("JSON parsing failed!");
+            return;
+        }
+        Debug.println((float)(root["actual"]));
+        Debug.println((float)(root["target"]));
+        updateBedTemperatures((float)(root["actual"]),(float)(root["target"]));
+    }
+    if ((!strcmp(topic, "octoprint/temperature/tool0")) && (length < 60)) {
+        char buf[64];
+        memcpy(buf, payload, length);
+        buf[length] = '\0';
+
+        Debug.println(buf);
+    
+        JsonObject& root = jsonBuffer.parseObject(buf);
+        if (!root.success()) {
+            Debug.println("JSON parsing failed!");
+            return;
+        }
+        Debug.println((float)(root["actual"]));
+        Debug.println((float)(root["target"]));
+        updateExtTemperatures((float)(root["actual"]),(float)(root["target"]));
+    }
+}
+
+
 
 void setup() {
     
@@ -335,16 +524,32 @@ void setup() {
     //myESP.OTA_setPassword("ota.pass");
     myESP.OTA_setHostname("oxtion");
     
+    myESP.addSubscription("octoprint/temperature/bed");
+    myESP.addSubscription("octoprint/temperature/tool0");
+    
+    myESP.setMQTTCallback(mqttCallback);
+
+    
     myESP.begin();
 
     nexInit();
 
-    nx_temp_update.attachPop(variableCallback);
-
+    nx_temp_update.attachPop(nxTemperatureCallback);
+    nx_move_home.attachPop(nxHomeCallback,&nx_move_home);
+    nx_move_home_x.attachPop(nxHomeCallback,&nx_move_home_x);
+    nx_move_home_y.attachPop(nxHomeCallback,&nx_move_home_y);
+    nx_move_home_z.attachPop(nxHomeCallback,&nx_move_home_z);
     
-    octoTasker.setInterval(getOctoConnectionState, 5000);
-    octoTasker.setInterval(getOctoPrinterState, 5000); 
-    ctoTasker.setInterval(getOctoJobState, 5000); 
+    nx_move_x_d.attachPop(nxMoveCallback,&nx_move_x_d);
+    nx_move_x_u.attachPop(nxMoveCallback,&nx_move_x_u);
+    nx_move_y_d.attachPop(nxMoveCallback,&nx_move_y_d);
+    nx_move_y_u.attachPop(nxMoveCallback,&nx_move_y_u);
+    nx_move_z_d.attachPop(nxMoveCallback,&nx_move_z_d);
+    nx_move_z_u.attachPop(nxMoveCallback,&nx_move_z_u);
+    
+   // octoTasker.setInterval(getAPIConnectionState, 5000);
+   // octoTasker.setInterval(getAPIPrinterState, 5000); 
+   // octoTasker.setInterval(getAPIJobState, 5000); 
     
     Debug.println("Initialization Finished.");
 }
