@@ -7,3 +7,4 @@ netInfo homeNet = {  .mqttHost = "192.168.123.45",     //can be blank if not usi
 
 const char* server = "octo.local";  // server's address
 const char* api_key = "APIAPIAPI";
+const char* nx_ota_url = "http://url/to/oxtion.tft";
