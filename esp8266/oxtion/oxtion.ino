@@ -27,6 +27,7 @@ char job_file[MAX_FILENAME_LEN] = "";
 float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
+int brightness = 50;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -57,6 +58,20 @@ NexDSButton nx_move_0_1 = NexDSButton(3,6,"bt0");
 NexDSButton nx_move_1 = NexDSButton(3,7,"bt1");
 NexDSButton nx_move_10 = NexDSButton(3,8,"bt2");
 
+// LED page
+
+NexButton nx_led_br_minus = NexButton(5,6,"b5");
+NexButton nx_led_br_plus = NexButton(5,7,"b6");
+NexProgressBar nx_led_brightness = NexProgressBar(5,15,"j0");
+NexButton nx_led_mode_0 = NexButton(5,8,"b7");
+NexButton nx_led_mode_1 = NexButton(5,9,"b8");
+NexButton nx_led_mode_2 = NexButton(5,10,"b9");
+NexButton nx_led_mode_3 = NexButton(5,11,"b10");
+NexButton nx_led_mode_4 = NexButton(5,12,"b11");
+NexButton nx_led_mode_5 = NexButton(5,13,"b12");
+NexButton nx_led_mode_6 = NexButton(5,14,"b13");
+
+
 
 NexTouch *nex_listen_list[] = 
 {
@@ -71,6 +86,15 @@ NexTouch *nex_listen_list[] =
     &nx_move_y_d,
     &nx_move_z_u,
     &nx_move_z_d,
+    &nx_led_br_minus,
+    &nx_led_br_plus,
+    &nx_led_mode_0,
+    &nx_led_mode_1,
+    &nx_led_mode_2,
+    &nx_led_mode_3,
+    &nx_led_mode_4,
+    &nx_led_mode_5,
+    &nx_led_mode_6,
     NULL
 };
 
@@ -209,6 +233,19 @@ void updateJobDetails(const char* file, float comp, int time, int time_left) {
     Debug.println(time);
     Debug.print("Job left: ");
     Debug.println(time_left);
+}
+
+void updateBrightness(int br) {
+    if (br < 0) {
+        br = 0;
+    }
+    if (br > 100) {
+        br = 100;
+    }
+    if (br != brightness) {
+        brightness = br;
+        nx_led_brightness.setValue(brightness);
+    }
 }
 
 bool readAPIConnectionContent() {
@@ -467,6 +504,15 @@ void nxMoveCallback(void *ptr) {
     }
 }
 
+void nxLedCallback(void *ptr) {
+    if (ptr == &nx_led_br_minus) {
+        updateBrightness(brightness-10);
+    }
+    if (ptr == &nx_led_br_plus) {
+        updateBrightness(brightness+10);
+    }
+}
+
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     const size_t BUFFER_SIZE = 1024;
     
@@ -551,6 +597,16 @@ void setup() {
     nx_move_y_u.attachPop(nxMoveCallback,&nx_move_y_u);
     nx_move_z_d.attachPop(nxMoveCallback,&nx_move_z_d);
     nx_move_z_u.attachPop(nxMoveCallback,&nx_move_z_u);
+    
+    nx_led_br_minus.attachPop(nxLedCallback,&nx_led_br_minus);
+    nx_led_br_plus.attachPop(nxLedCallback,&nx_led_br_plus);
+    nx_led_mode_0.attachPop(nxLedCallback,&nx_led_mode_0);
+    nx_led_mode_1.attachPop(nxLedCallback,&nx_led_mode_1);
+    nx_led_mode_2.attachPop(nxLedCallback,&nx_led_mode_2);
+    nx_led_mode_3.attachPop(nxLedCallback,&nx_led_mode_3);
+    nx_led_mode_4.attachPop(nxLedCallback,&nx_led_mode_4);
+    nx_led_mode_5.attachPop(nxLedCallback,&nx_led_mode_5);
+    nx_led_mode_6.attachPop(nxLedCallback,&nx_led_mode_6);
     
    // octoTasker.setInterval(getAPIConnectionState, 5000);
    // octoTasker.setInterval(getAPIPrinterState, 5000); 
