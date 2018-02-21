@@ -27,7 +27,7 @@ char job_file[MAX_FILENAME_LEN] = "";
 float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
-int brightness = 50;
+int brightness = -1;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -62,7 +62,7 @@ NexDSButton nx_move_10 = NexDSButton(3,8,"bt2");
 
 NexButton nx_led_br_minus = NexButton(5,6,"b5");
 NexButton nx_led_br_plus = NexButton(5,7,"b6");
-NexProgressBar nx_led_brightness = NexProgressBar(5,15,"j0");
+NexProgressBar nx_led_brightness = NexProgressBar(5,15,"led.j0");
 NexButton nx_led_mode_0 = NexButton(5,8,"b7");
 NexButton nx_led_mode_1 = NexButton(5,9,"b8");
 NexButton nx_led_mode_2 = NexButton(5,10,"b9");
@@ -189,13 +189,13 @@ void updateConnectionState(int state) {
 }
 
 void updateExtTemperatures(float act, float tar) {
-    if ((uint32)act != (uint32)temp_ext_act) {
+    if ((int32)act != (int32)temp_ext_act) {
       // change value on display
       nx_temp_ext_c.setValue((uint32)act);
     }
     temp_ext_act = act;
 
-    if ((uint32)tar != (uint32)temp_ext_tar) {
+    if ((int32)tar != (int32)temp_ext_tar) {
       // change value on display
       nx_temp_ext_ti.setValue((uint32)tar);
     }
@@ -203,14 +203,14 @@ void updateExtTemperatures(float act, float tar) {
 }
 
 void updateBedTemperatures(float act, float tar) {
-    if ((uint32)act != (uint32)temp_bed_act) {
+    if ((int32)act != (int32)temp_bed_act) {
       // change value on display
         Debug.println("updateBedTemp act");
       nx_temp_bed_c.setValue((uint32)act);
     }
     temp_bed_act = act;
 
-    if ((uint32)tar != (uint32)temp_bed_tar) {
+    if ((int32)tar != (int32)temp_bed_tar) {
       // change value on display
         Debug.println("updateBedTemp tar");
       nx_temp_bed_ti.setValue((uint32)tar);
@@ -607,6 +607,11 @@ void setup() {
     nx_led_mode_4.attachPop(nxLedCallback,&nx_led_mode_4);
     nx_led_mode_5.attachPop(nxLedCallback,&nx_led_mode_5);
     nx_led_mode_6.attachPop(nxLedCallback,&nx_led_mode_6);
+    
+    updateBrightness(50);
+    updateBedTemperatures(0,0);
+    updateExtTemperatures(0,0);
+    
     
    // octoTasker.setInterval(getAPIConnectionState, 5000);
    // octoTasker.setInterval(getAPIPrinterState, 5000); 
