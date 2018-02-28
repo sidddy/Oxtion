@@ -1,3 +1,5 @@
+#define MQTT_MAX_PACKET_SIZE 1024
+
 #include <ESPHelper.h>
 #include <ArduinoJson.h>
 #include <Tasker.h>
@@ -12,9 +14,30 @@
 #define OCTO_STATE_STANDBY 1
 #define OCTO_STATE_OFFLINE 2
 #define OCTO_STATE_PRINTING 3
-#define OCTO_STATE_UNKNOWN 4
+#define OCTO_STATE_LOADED 4
+#define OCTO_STATE_PAUSED 5
+#define OCTO_STATE_UNKNOWN 6
+
+#define OCTO_STATE_MAX 6
+
+const char *stateString[OCTO_STATE_MAX+1] = { "", "Operational", "Offline", "Printing", "Operational", "Paused", "Unknown" };
 
 #define MAX_FILENAME_LEN 256
+
+#define BUTTON_CONNECT 11
+#define BUTTON_CANCEL 13
+#define BUTTON_DISABLED 15
+#define BUTTON_PAUSE 17
+#define BUTTON_PRINT 19
+#define BUTTON_RESUME 21
+
+const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLED}, //none
+                                                {BUTTON_DISABLED, BUTTON_DISABLED}, //standby
+                                                {BUTTON_CONNECT, BUTTON_DISABLED},  //offline
+                                                {BUTTON_PAUSE, BUTTON_CANCEL},      //printing
+                                                {BUTTON_PRINT, BUTTON_DISABLED},    //loaded
+                                                {BUTTON_RESUME, BUTTON_CANCEL},     //paused
+                                                {BUTTON_DISABLED, BUTTON_DISABLED}};
 
 
 // State variables, reflecting the current state determined via Octoprint API / MQTT
@@ -71,6 +94,14 @@ NexButton nx_led_mode_4 = NexButton(5,12,"b11");
 NexButton nx_led_mode_5 = NexButton(5,13,"b12");
 NexButton nx_led_mode_6 = NexButton(5,14,"b13");
 
+// Main page
+NexText nx_main_state = NexText(1,9,"main.t0");
+NexText nx_main_file = NexText(1,10,"main.t1");
+NexText nx_main_compl = NexText(1,11,"main.t2");
+NexText nx_main_time = NexText(1,12,"main.t3");
+NexText nx_main_left = NexText(1,13,"main.t4");
+NexButton nx_main_button1 = NexButton(1,14,"main.b5");
+NexButton nx_main_button2 = NexButton(1,15,"main.b6");
 
 
 NexTouch *nex_listen_list[] = 
@@ -95,6 +126,8 @@ NexTouch *nex_listen_list[] =
     &nx_led_mode_4,
     &nx_led_mode_5,
     &nx_led_mode_6,
+    &nx_main_button1,
+    &nx_main_button2,
     NULL
 };
 
@@ -179,12 +212,27 @@ bool skipAPIResponseHeaders() {
 }
 
 void updateConnectionState(int state) {
-    if (c_state != state) {
-        Debug.print("Connection state changed. Old: ");
+    if ((c_state != state) and (state > 0) and (state<=OCTO_STATE_MAX)) {
+        /*Debug.print("Connection state changed. Old: ");
         Debug.print(c_state);
         Debug.print(" New: ");
-        Debug.println(state);
+        Debug.println(state);*/
         c_state = state;
+        nx_main_state.setText(stateString[c_state]);
+        char buf[20];
+        snprintf(buf,20,"main.b5.pic=%d",stateButtons[c_state][0]);
+        Debug.println(buf);
+        sendCommand(buf);
+        snprintf(buf,20,"main.b6.pic=%d",stateButtons[c_state][1]);
+        Debug.println(buf);
+        sendCommand(buf);
+        snprintf(buf,20,"main.b5.pic2=%d",stateButtons[c_state][0]+1);
+        Debug.println(buf);
+        sendCommand(buf);
+        snprintf(buf,20,"main.b6.pic2=%d",stateButtons[c_state][1]+1);
+        Debug.println(buf);
+        sendCommand(buf);
+        
     }
 }
 
@@ -219,20 +267,39 @@ void updateBedTemperatures(float act, float tar) {
 }
 
 void updateJobDetails(const char* file, float comp, int time, int time_left) {
+    //Debug.print("Job file: ");
+    //Debug.println(file);
+    if ((strlen(file)>0) && (c_state == OCTO_STATE_STANDBY)) {
+        updateConnectionState(OCTO_STATE_LOADED);
+    }
     if (strcmp(file, job_file)) {
-        Debug.print("New Job: ");
-        Debug.println(file);
+      //  Debug.print("New Job: ");
+      //  Debug.println(file);
         strncpy(job_file, file, MAX_FILENAME_LEN);
+        nx_main_file.setText(file);
     }
     job_completion = comp;
     job_time = time;
     job_time_left = time_left;
-    Debug.print("Job comp: ");
-    Debug.println(comp);
-    Debug.print("Job time: ");
-    Debug.println(time);
-    Debug.print("Job left: ");
-    Debug.println(time_left);
+    
+    char buf[20];
+    snprintf(buf,20,"%d.%02d%%",(int)(job_completion),((int)(job_completion*100))%100);
+    nx_main_compl.setText(buf);
+    
+    int h,m,s;
+    h = (int)(time/3600);
+    m = (int)((time-h*3600)/60);
+    s = time-h*3600-m*60;
+    
+    snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
+    nx_main_time.setText(buf);
+    
+    h = (int)(time_left/3600);
+    m = (int)((time_left-h*3600)/60);
+    s = time_left-h*3600-m*60;
+    
+    snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
+    nx_main_left.setText(buf);
 }
 
 void updateBrightness(int br) {
@@ -262,7 +329,11 @@ bool readAPIConnectionContent() {
     }
     
     if (!strcmp(root["current"]["state"], "Operational")) {
-        updateConnectionState(OCTO_STATE_STANDBY);
+        if (strlen(job_file)>0) {
+            updateConnectionState(OCTO_STATE_LOADED);
+        } else {
+            updateConnectionState(OCTO_STATE_STANDBY);
+        }
     } else if (!strcmp(root["current"]["state"], "Connecting")) {
         updateConnectionState(OCTO_STATE_STANDBY);
     } else if (!strcmp(root["current"]["state"], "Closed")) {
@@ -309,7 +380,7 @@ bool readAPIJobContent() {
     
     
     
-    updateJobDetails((const char*)(root["job"]["file"]["name"] | "N/A"),(float)(root["progress"]["completion"]|0),(int)(root["progress"]["printTime"]|0),(int)(root["progress"]["printTimeLeft"]|0));
+    updateJobDetails((const char*)(root["job"]["file"]["name"]),(float)(root["progress"]["completion"]),(int)(root["progress"]["printTime"]),(int)(root["progress"]["printTimeLeft"]));
     
     
     return true;
@@ -513,11 +584,16 @@ void nxLedCallback(void *ptr) {
     }
 }
 
+void nxMainCallback(void *ptr) {
+}
+
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     const size_t BUFFER_SIZE = 1024;
     
     // Allocate a temporary memory pool
     DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
+    Debug.print("MQTT Callback, topic: ");
+    Debug.println(topic);
     
     if ((!strcmp(topic, "octoprint/temperature/bed")) && (length < 60)) {
         char buf[64];
@@ -535,8 +611,8 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         Debug.println((float)(root["target"]));
         updateBedTemperatures((float)(root["actual"]),(float)(root["target"]));
     }
-    if ((!strcmp(topic, "octoprint/temperature/tool0")) && (length < 60)) {
-        char buf[64];
+    if ((!strcmp(topic, "octoprint/temperature/tool0")) && (length < 128)) {
+        char buf[128];
         memcpy(buf, payload, length);
         buf[length] = '\0';
 
@@ -554,6 +630,39 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     if (!strcmp(topic, "oxtion/nexUpdate")) {
         startNextionOTA(nx_ota_url);
     }
+    if (!strcmp(topic, "octoprint/event/Connected")) {
+        if (strlen(job_file)>0) {
+            updateConnectionState(OCTO_STATE_LOADED);
+        } else {
+            updateConnectionState(OCTO_STATE_STANDBY);
+        }
+     }
+    if (!strcmp(topic, "octoprint/event/Disonnected")) {
+        updateConnectionState(OCTO_STATE_OFFLINE);
+    }
+    if (!strcmp(topic, "octoprint/event/PrintStarted")) {
+        updateConnectionState(OCTO_STATE_PRINTING);
+    }
+    if (!strcmp(topic, "octoprint/event/PrintResumed")) {
+        updateConnectionState(OCTO_STATE_PRINTING);
+    }
+    if (!strcmp(topic, "octoprint/event/PrintPaused")) {
+        updateConnectionState(OCTO_STATE_PAUSED);
+    }
+    if (!strcmp(topic, "octoprint/event/PrintFailed")) {
+        if (strlen(job_file)>0) {
+            updateConnectionState(OCTO_STATE_LOADED);
+        } else {
+            updateConnectionState(OCTO_STATE_STANDBY);
+        }
+    }
+    
+}
+
+void wifiCallback() {
+    getAPIConnectionState(0);
+    //getAPIPrinterState(0);
+    //getAPIJobState(0);
 }
 
 
@@ -577,8 +686,11 @@ void setup() {
     myESP.addSubscription("octoprint/temperature/bed");
     myESP.addSubscription("octoprint/temperature/tool0");
     myESP.addSubscription("oxtion/nexUpdate");
+    myESP.addSubscription("oxtion/estimate");
+    myESP.addSubscription("octoprint/event/#");    
     
     myESP.setMQTTCallback(mqttCallback);
+    myESP.setWifiCallback(wifiCallback);
 
     
     myESP.begin();
@@ -608,14 +720,24 @@ void setup() {
     nx_led_mode_5.attachPop(nxLedCallback,&nx_led_mode_5);
     nx_led_mode_6.attachPop(nxLedCallback,&nx_led_mode_6);
     
+    nx_main_button1.attachPop(nxMainCallback,&nx_main_button1);
+    nx_main_button2.attachPop(nxMainCallback,&nx_main_button2);
+    
     updateBrightness(50);
     updateBedTemperatures(0,0);
     updateExtTemperatures(0,0);
+    updateConnectionState(OCTO_STATE_UNKNOWN);
+    
+    nx_main_state.setText("");
+    nx_main_file.setText("");
+    nx_main_compl.setText("");
+    nx_main_time.setText("");
+    nx_main_left.setText("");
     
     
-   // octoTasker.setInterval(getAPIConnectionState, 5000);
-   // octoTasker.setInterval(getAPIPrinterState, 5000); 
-   // octoTasker.setInterval(getAPIJobState, 5000); 
+   //octoTasker.setInterval(getAPIConnectionState, 5000);
+   //octoTasker.setInterval(getAPIPrinterState, 5000); 
+   //octoTasker.setInterval(getAPIJobState, 5000); 
     
     Debug.println("Initialization Finished.");
 }
@@ -690,6 +812,7 @@ void startNextionOTA (String otaURL) {
       }
       Debug.println("LCD OTA: Starting update");
       while (http.connected() && (len > 0 || len == -1)) {
+        yield();
         // get available data size
         size_t size = stream->available();
         if (size) {
@@ -706,10 +829,10 @@ void startNextionOTA (String otaURL) {
             pCent = (total * 100) / FileSize;
             count = 0;
             if (otaReturnSuccess()) {
-              Debug.println("LCD OTA: Part " + String(partNum) + " OK, " + String(pCent) + "% complete");
+              //Debug.println("LCD OTA: Part " + String(partNum) + " OK, " + String(pCent) + "% complete");
             }
             else {
-              Debug.println("LCD OTA: Part " + String(partNum) + " FAILED, " + String(pCent) + "% complete");
+              //Debug.println("LCD OTA: Part " + String(partNum) + " FAILED, " + String(pCent) + "% complete");
             }
           }
           if (len > 0) {
@@ -744,7 +867,6 @@ bool otaReturnSuccess() {
   while ((millis() - nextionCommandTimer) < nextionCommandTimeout) {
     if (Serial.available()) {
       byte inByte = Serial.read();
-      Debug.println(inByte);
       if (inByte == 0x5) {
         otaSuccessVal = true;
         break;
