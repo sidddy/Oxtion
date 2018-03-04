@@ -8,19 +8,18 @@
 
 #include <Nextion.h>
 
-
 #include "config.h"
 
+#define OCTO_STATE_UNKNOWN 0
 #define OCTO_STATE_STANDBY 1
 #define OCTO_STATE_OFFLINE 2
 #define OCTO_STATE_PRINTING 3
 #define OCTO_STATE_LOADED 4
 #define OCTO_STATE_PAUSED 5
-#define OCTO_STATE_UNKNOWN 6
 
-#define OCTO_STATE_MAX 6
+#define OCTO_STATE_MAX 5
 
-const char *stateString[OCTO_STATE_MAX+1] = { "", "Operational", "Offline", "Printing", "Operational", "Paused", "Unknown" };
+const char *stateString[OCTO_STATE_MAX+1] = { "Unknown", "Operational", "Offline", "Printing", "Operational", "Paused" };
 
 #define MAX_FILENAME_LEN 256
 
@@ -31,13 +30,12 @@ const char *stateString[OCTO_STATE_MAX+1] = { "", "Operational", "Offline", "Pri
 #define BUTTON_PRINT 19
 #define BUTTON_RESUME 21
 
-const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLED}, //none
+const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLED}, //unknown
                                                 {BUTTON_DISABLED, BUTTON_DISABLED}, //standby
                                                 {BUTTON_CONNECT, BUTTON_DISABLED},  //offline
                                                 {BUTTON_PAUSE, BUTTON_CANCEL},      //printing
                                                 {BUTTON_PRINT, BUTTON_DISABLED},    //loaded
-                                                {BUTTON_RESUME, BUTTON_CANCEL},     //paused
-                                                {BUTTON_DISABLED, BUTTON_DISABLED}};
+                                                {BUTTON_RESUME, BUTTON_CANCEL} };    //paused
 
 
 // State variables, reflecting the current state determined via Octoprint API / MQTT
@@ -51,6 +49,7 @@ float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
 int brightness = -1;
+unsigned long cancel_push = 0;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -584,7 +583,34 @@ void nxLedCallback(void *ptr) {
     }
 }
 
-void nxMainCallback(void *ptr) {
+void nxMainPopCallback(void *ptr) {
+    Debug.println("main pop");
+    if ((ptr == &nx_main_button2) && (stateButtons[c_state][1] == BUTTON_CANCEL)) {
+        Debug.println("Main pop cancel");
+        cancel_push = 0;
+    }
+}
+
+void nxMainPushCallback(void *ptr) {
+    Debug.println("main push");
+    if ((ptr == &nx_main_button2) && (stateButtons[c_state][1] == BUTTON_CANCEL)) {
+        Debug.println("Main push cancel");
+        cancel_push = millis();
+    } //TBD
+}
+
+void updateCancelStatus(int) {
+    if (cancel_push == 0) {
+        return;
+    }
+    
+    unsigned long cancel_dur = millis() - cancel_push;
+    if (cancel_dur > 5000) {
+        cancel_dur = 5000;
+    }
+    char buf[30];
+    snprintf(buf,30,"Cancel in %ds",(5000-cancel_dur)/1000);
+    nx_main_state.setText(buf);
 }
 
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
@@ -592,26 +618,25 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     
     // Allocate a temporary memory pool
     DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
-    Debug.print("MQTT Callback, topic: ");
-    Debug.println(topic);
+    //Debug.print("MQTT Callback, topic: ");
+    //Debug.println(topic);
     
     if ((!strcmp(topic, "octoprint/temperature/bed")) && (length < 60)) {
         char buf[64];
         memcpy(buf, payload, length);
         buf[length] = '\0';
 
-        Debug.println(buf);
+        //Debug.println(buf);
     
         JsonObject& root = jsonBuffer.parseObject(buf);
         if (!root.success()) {
             Debug.println("JSON parsing failed!");
             return;
         }
-        Debug.println((float)(root["actual"]));
-        Debug.println((float)(root["target"]));
+        //Debug.println((float)(root["actual"]));
+        //Debug.println((float)(root["target"]));
         updateBedTemperatures((float)(root["actual"]),(float)(root["target"]));
-    }
-    if ((!strcmp(topic, "octoprint/temperature/tool0")) && (length < 128)) {
+    } else if ((!strcmp(topic, "octoprint/temperature/tool0")) && (length < 128)) {
         char buf[128];
         memcpy(buf, payload, length);
         buf[length] = '\0';
@@ -626,35 +651,41 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         Debug.println((float)(root["actual"]));
         Debug.println((float)(root["target"]));
         updateExtTemperatures((float)(root["actual"]),(float)(root["target"]));
-    }
-    if (!strcmp(topic, "oxtion/nexUpdate")) {
+    } else if (!strcmp(topic, "oxtion/nexUpdate")) {
         startNextionOTA(nx_ota_url);
-    }
-    if (!strcmp(topic, "octoprint/event/Connected")) {
+    } else if (!strcmp(topic, "octoprint/event/Connected")) {
         if (strlen(job_file)>0) {
             updateConnectionState(OCTO_STATE_LOADED);
         } else {
             updateConnectionState(OCTO_STATE_STANDBY);
         }
-     }
-    if (!strcmp(topic, "octoprint/event/Disonnected")) {
+    } else if (!strcmp(topic, "octoprint/event/Disonnected")) {
         updateConnectionState(OCTO_STATE_OFFLINE);
-    }
-    if (!strcmp(topic, "octoprint/event/PrintStarted")) {
+    } else if (!strcmp(topic, "octoprint/event/PrintStarted")) {
         updateConnectionState(OCTO_STATE_PRINTING);
-    }
-    if (!strcmp(topic, "octoprint/event/PrintResumed")) {
+    } else if (!strcmp(topic, "octoprint/event/PrintResumed")) {
         updateConnectionState(OCTO_STATE_PRINTING);
-    }
-    if (!strcmp(topic, "octoprint/event/PrintPaused")) {
+    } else if (!strcmp(topic, "octoprint/event/PrintPaused")) {
         updateConnectionState(OCTO_STATE_PAUSED);
-    }
-    if (!strcmp(topic, "octoprint/event/PrintFailed")) {
+    } else if (!strcmp(topic, "octoprint/event/PrintFailed")) {
         if (strlen(job_file)>0) {
             updateConnectionState(OCTO_STATE_LOADED);
         } else {
             updateConnectionState(OCTO_STATE_STANDBY);
         }
+    } else if ((!strcmp(topic, "oxtion/estimate")) && (length < 128)) {
+        char buf[128];
+        memcpy(buf, payload, length);
+        buf[length] = '\0';
+    
+        JsonObject& root = jsonBuffer.parseObject(buf);
+        if (!root.success()) {
+            Debug.println("JSON parsing failed!");
+            return;
+        }
+        updateJobDetails(job_file, (float)root["progress"], (int)root["printtime"], (int)root["printtimeleft"]);
+        
+        
     }
     
 }
@@ -720,8 +751,10 @@ void setup() {
     nx_led_mode_5.attachPop(nxLedCallback,&nx_led_mode_5);
     nx_led_mode_6.attachPop(nxLedCallback,&nx_led_mode_6);
     
-    nx_main_button1.attachPop(nxMainCallback,&nx_main_button1);
-    nx_main_button2.attachPop(nxMainCallback,&nx_main_button2);
+    nx_main_button1.attachPop(nxMainPopCallback,&nx_main_button1);
+    nx_main_button2.attachPop(nxMainPopCallback,&nx_main_button2);
+    nx_main_button1.attachPush(nxMainPushCallback,&nx_main_button1);
+    nx_main_button2.attachPush(nxMainPushCallback,&nx_main_button2);
     
     updateBrightness(50);
     updateBedTemperatures(0,0);
@@ -738,6 +771,7 @@ void setup() {
    //octoTasker.setInterval(getAPIConnectionState, 5000);
    //octoTasker.setInterval(getAPIPrinterState, 5000); 
    //octoTasker.setInterval(getAPIJobState, 5000); 
+    octoTasker.setInterval(updateCancelStatus, 100);
     
     Debug.println("Initialization Finished.");
 }
