@@ -39,17 +39,17 @@ const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLE
 
 
 // State variables, reflecting the current state determined via Octoprint API / MQTT
-int c_state = 0;
+int c_state = -1;
 float temp_ext_act = -1;
 float temp_ext_tar = -1;
 float temp_bed_act = -1;
 float temp_bed_tar = -1;
 char job_file[MAX_FILENAME_LEN] = "";
+char path[MAX_FILENAME_LEN] = "";
 float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
 int brightness = -1;
-unsigned long cancel_push = 0;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -94,13 +94,18 @@ NexButton nx_led_mode_5 = NexButton(5,13,"b12");
 NexButton nx_led_mode_6 = NexButton(5,14,"b13");
 
 // Main page
-NexText nx_main_state = NexText(1,9,"main.t0");
-NexText nx_main_file = NexText(1,10,"main.t1");
-NexText nx_main_compl = NexText(1,11,"main.t2");
-NexText nx_main_time = NexText(1,12,"main.t3");
-NexText nx_main_left = NexText(1,13,"main.t4");
-NexButton nx_main_button1 = NexButton(1,14,"main.b5");
-NexButton nx_main_button2 = NexButton(1,15,"main.b6");
+NexText nx_main_state = NexText(1,7,"main.t0");
+NexText nx_main_file = NexText(1,8,"main.t1");
+NexText nx_main_compl = NexText(1,9,"main.t2");
+NexText nx_main_time = NexText(1,10,"main.t3");
+NexText nx_main_left = NexText(1,11,"main.t4");
+NexButton nx_main_button1 = NexButton(1,12,"main.b5");
+NexButton nx_main_button2 = NexButton(1,13,"main.b6");
+NexProgressBar nx_main_progress = NexProgressBar(1,19,"main.j0");
+
+// Cancel page
+NexButton nx_cancel_yes = NexButton(6,3,"cancel.b0");
+NexButton nx_cancel_no = NexButton(6,4,"cancel.b1");
 
 
 NexTouch *nex_listen_list[] = 
@@ -127,6 +132,8 @@ NexTouch *nex_listen_list[] =
     &nx_led_mode_6,
     &nx_main_button1,
     &nx_main_button2,
+    &nx_cancel_yes,
+    &nx_cancel_no,
     NULL
 };
 
@@ -211,7 +218,7 @@ bool skipAPIResponseHeaders() {
 }
 
 void updateConnectionState(int state) {
-    if ((c_state != state) and (state > 0) and (state<=OCTO_STATE_MAX)) {
+    if ((c_state != state) and (state >= 0) and (state<=OCTO_STATE_MAX)) {
         /*Debug.print("Connection state changed. Old: ");
         Debug.print(c_state);
         Debug.print(" New: ");
@@ -284,6 +291,7 @@ void updateJobDetails(const char* file, float comp, int time, int time_left) {
     char buf[20];
     snprintf(buf,20,"%d.%02d%%",(int)(job_completion),((int)(job_completion*100))%100);
     nx_main_compl.setText(buf);
+    nx_main_progress.setValue((int)(job_completion));
     
     int h,m,s;
     h = (int)(time/3600);
@@ -379,7 +387,7 @@ bool readAPIJobContent() {
     
     
     
-    updateJobDetails((const char*)(root["job"]["file"]["name"]),(float)(root["progress"]["completion"]),(int)(root["progress"]["printTime"]),(int)(root["progress"]["printTimeLeft"]));
+    updateJobDetails((root["job"]["file"]["name"])?(const char*)(root["job"]["file"]["name"]):"",(root["progress"]["completion"])?(float)(root["progress"]["completion"]):0,(int)(root["progress"]["printTime"]),(int)(root["progress"]["printTimeLeft"]));
     
     
     return true;
@@ -585,9 +593,38 @@ void nxLedCallback(void *ptr) {
 
 void nxMainPopCallback(void *ptr) {
     Debug.println("main pop");
-    if ((ptr == &nx_main_button2) && (stateButtons[c_state][1] == BUTTON_CANCEL)) {
-        Debug.println("Main pop cancel");
-        cancel_push = 0;
+    if (ptr == &nx_main_button1) {
+        if (stateButtons[c_state][0] == BUTTON_CONNECT) {
+            Debug.println("Main pop connect");
+            if (connectAPI(server)) {
+                Debug.println("connected to api");
+                postAPICommand(server, "/api/connection", "{\"command\": \"connect\" }");
+                disconnectAPI();
+            }
+        } else if (stateButtons[c_state][0] == BUTTON_PAUSE) {
+            if (connectAPI(server)) {                                                                                                                                       
+                postAPICommand(server, "/api/job", "{\"command\": \"pause\", \"action\": \"pause\" }");
+                disconnectAPI();                                                                                                                                            
+            }
+        } else if (stateButtons[c_state][0] == BUTTON_RESUME) {
+            if (connectAPI(server)) {
+                postAPICommand(server, "/api/job", "{\"command\": \"pause\", \"action\": \"resume\" }");
+                disconnectAPI();                                                                                                                                            
+            } 
+        } else if (stateButtons[c_state][0] == BUTTON_PRINT) {
+            if (connectAPI(server)) {
+                postAPICommand(server, "/api/job", "{\"command\": \"start\" }");                                                                    
+                disconnectAPI();                                                                                                                                            
+            }                                                                                                                                                               
+        }
+    } else if (ptr == &nx_main_button2) {
+        if (stateButtons[c_state][1] == BUTTON_CANCEL) {
+            Debug.println("Main pop cancel");
+            sendCommand("page cancel");
+        } else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
+            Debug.println("trying job api call");
+            getAPIJobState(0);
+        }
     }
 }
 
@@ -595,22 +632,19 @@ void nxMainPushCallback(void *ptr) {
     Debug.println("main push");
     if ((ptr == &nx_main_button2) && (stateButtons[c_state][1] == BUTTON_CANCEL)) {
         Debug.println("Main push cancel");
-        cancel_push = millis();
     } //TBD
 }
 
-void updateCancelStatus(int) {
-    if (cancel_push == 0) {
-        return;
+void nxCancelPopCallback(void *ptr) {
+    if (ptr == &nx_cancel_no) {
+        sendCommand("page main");
+    } else if (ptr == &nx_cancel_yes) {
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/job", "{\"command\": \"cancel\" }");
+           disconnectAPI();
+        }
+        sendCommand("page main");
     }
-    
-    unsigned long cancel_dur = millis() - cancel_push;
-    if (cancel_dur > 5000) {
-        cancel_dur = 5000;
-    }
-    char buf[30];
-    snprintf(buf,30,"Cancel in %ds",(5000-cancel_dur)/1000);
-    nx_main_state.setText(buf);
 }
 
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
@@ -618,8 +652,8 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     
     // Allocate a temporary memory pool
     DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
-    //Debug.print("MQTT Callback, topic: ");
-    //Debug.println(topic);
+    Debug.print("MQTT Callback, topic: ");
+    Debug.println(topic);
     
     if ((!strcmp(topic, "octoprint/temperature/bed")) && (length < 60)) {
         char buf[64];
@@ -652,6 +686,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         Debug.println((float)(root["target"]));
         updateExtTemperatures((float)(root["actual"]),(float)(root["target"]));
     } else if (!strcmp(topic, "oxtion/nexUpdate")) {
+        //mqttUnsubscribe();
         startNextionOTA(nx_ota_url);
     } else if (!strcmp(topic, "octoprint/event/Connected")) {
         if (strlen(job_file)>0) {
@@ -659,7 +694,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         } else {
             updateConnectionState(OCTO_STATE_STANDBY);
         }
-    } else if (!strcmp(topic, "octoprint/event/Disonnected")) {
+    } else if (!strcmp(topic, "octoprint/event/Disconnected")) {
         updateConnectionState(OCTO_STATE_OFFLINE);
     } else if (!strcmp(topic, "octoprint/event/Shutdown")) {
         updateConnectionState(OCTO_STATE_OFFLINE);
@@ -675,6 +710,18 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         } else {
             updateConnectionState(OCTO_STATE_STANDBY);
         }
+    } else if ((!strcmp(topic, "octoprint/event/FileSelected")) && (length < 1024)) {
+        char buf[1024];
+        memcpy(buf, payload, length);
+        buf[length] = '\0';
+    
+        JsonObject& root = jsonBuffer.parseObject(buf);
+        if (!root.success()) {
+            Debug.println("JSON parsing failed!");
+            return;
+        }
+        updateJobDetails(root["name"], job_completion, job_time, job_time_left);
+        
     } else if ((!strcmp(topic, "oxtion/estimate")) && (length < 128)) {
         char buf[128];
         memcpy(buf, payload, length);
@@ -686,8 +733,6 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
             return;
         }
         updateJobDetails(job_file, (float)root["progress"], (int)root["printtime"], (int)root["printtimeleft"]);
-        
-        
     }
     
 }
@@ -695,9 +740,8 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
 void wifiCallback() {
     getAPIConnectionState(0);
     //getAPIPrinterState(0);
-    //getAPIJobState(0);
+    getAPIJobState(0);
 }
-
 
 
 void setup() {
@@ -755,8 +799,11 @@ void setup() {
     
     nx_main_button1.attachPop(nxMainPopCallback,&nx_main_button1);
     nx_main_button2.attachPop(nxMainPopCallback,&nx_main_button2);
-    nx_main_button1.attachPush(nxMainPushCallback,&nx_main_button1);
-    nx_main_button2.attachPush(nxMainPushCallback,&nx_main_button2);
+    //nx_main_button1.attachPush(nxMainPushCallback,&nx_main_button1);
+    //nx_main_button2.attachPush(nxMainPushCallback,&nx_main_button2);
+
+    nx_cancel_yes.attachPop(nxCancelPopCallback,&nx_cancel_yes);
+    nx_cancel_no.attachPop(nxCancelPopCallback,&nx_cancel_no);
     
     updateBrightness(50);
     updateBedTemperatures(0,0);
@@ -768,14 +815,22 @@ void setup() {
     nx_main_compl.setText("");
     nx_main_time.setText("");
     nx_main_left.setText("");
+    sendCommand("page main");
     
     
    //octoTasker.setInterval(getAPIConnectionState, 5000);
    //octoTasker.setInterval(getAPIPrinterState, 5000); 
    //octoTasker.setInterval(getAPIJobState, 5000); 
-    octoTasker.setInterval(updateCancelStatus, 100);
     
     Debug.println("Initialization Finished.");
+}
+
+void mqttUnsubscribe() {
+    myESP.removeSubscription("octoprint/temperature/bed");
+    myESP.removeSubscription("octoprint/temperature/tool0");
+    myESP.removeSubscription("oxtion/nexUpdate");
+    myESP.removeSubscription("oxtion/estimate");
+    myESP.removeSubscription("octoprint/event/#");  
 }
 
 void loop(){
@@ -876,6 +931,7 @@ void startNextionOTA (String otaURL) {
           }
         }
         //delay(1);
+        yield();
       }
       partNum++;
       //delay (250);
