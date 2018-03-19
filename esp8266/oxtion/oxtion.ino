@@ -661,6 +661,8 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         }
     } else if (!strcmp(topic, "octoprint/event/Disonnected")) {
         updateConnectionState(OCTO_STATE_OFFLINE);
+    } else if (!strcmp(topic, "octoprint/event/Shutdown")) {
+        updateConnectionState(OCTO_STATE_OFFLINE);
     } else if (!strcmp(topic, "octoprint/event/PrintStarted")) {
         updateConnectionState(OCTO_STATE_PRINTING);
     } else if (!strcmp(topic, "octoprint/event/PrintResumed")) {
