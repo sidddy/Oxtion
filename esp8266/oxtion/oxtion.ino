@@ -163,6 +163,7 @@ bool sendAPIRequest(const char* host, const char* resource) {
     client.println(host);
     client.print("X-Api-Key: ");
     client.println(api_key);
+    client.println("X-Requested-With: XMLHttpRequest");
     client.println("Connection: close");
     client.println();
     
