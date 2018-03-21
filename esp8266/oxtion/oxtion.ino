@@ -99,8 +99,8 @@ NexText nx_main_file = NexText(1,8,"main.t1");
 NexText nx_main_compl = NexText(1,9,"main.t2");
 NexText nx_main_time = NexText(1,10,"main.t3");
 NexText nx_main_left = NexText(1,11,"main.t4");
-NexButton nx_main_button1 = NexButton(1,12,"main.b5");
-NexButton nx_main_button2 = NexButton(1,13,"main.b6");
+NexButton nx_main_button1 = NexButton(1,11,"main.b5");
+NexButton nx_main_button2 = NexButton(1,12,"main.b6");
 NexProgressBar nx_main_progress = NexProgressBar(1,19,"main.j0");
 
 // Cancel page
@@ -383,12 +383,8 @@ bool readAPIJobContent() {
         Debug.println("JSON parsing failed!");
         return false;
     }
-
     
-    
-    
-    updateJobDetails((root["job"]["file"]["name"])?(const char*)(root["job"]["file"]["name"]):"",(root["progress"]["completion"])?(float)(root["progress"]["completion"]):0,(int)(root["progress"]["printTime"]),(int)(root["progress"]["printTimeLeft"]));
-    
+    updateJobDetails((root["job"]["file"]["name"]|"n/a"),(root["progress"]["completion"]|0.0),(root["progress"]["printTime"]|0),(root["progress"]["printTimeLeft"]|0));
     
     return true;
 }
@@ -594,6 +590,7 @@ void nxLedCallback(void *ptr) {
 void nxMainPopCallback(void *ptr) {
     Debug.println("main pop");
     if (ptr == &nx_main_button1) {
+         Debug.println("main pop but1");
         if (stateButtons[c_state][0] == BUTTON_CONNECT) {
             Debug.println("Main pop connect");
             if (connectAPI(server)) {
@@ -618,9 +615,11 @@ void nxMainPopCallback(void *ptr) {
             }                                                                                                                                                               
         }
     } else if (ptr == &nx_main_button2) {
+         Debug.println("main pop but2");
         if (stateButtons[c_state][1] == BUTTON_CANCEL) {
             Debug.println("Main pop cancel");
-            sendCommand("page cancel");
+            //sendCommand("page cancel");
+            getAPIJobState(0);
         } else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
             Debug.println("trying job api call");
             getAPIJobState(0);
@@ -652,8 +651,8 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     
     // Allocate a temporary memory pool
     DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
-    Debug.print("MQTT Callback, topic: ");
-    Debug.println(topic);
+    //Debug.print("MQTT Callback, topic: ");
+    //Debug.println(topic);
     
     if ((!strcmp(topic, "octoprint/temperature/bed")) && (length < 60)) {
         char buf[64];
@@ -675,15 +674,15 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         memcpy(buf, payload, length);
         buf[length] = '\0';
 
-        Debug.println(buf);
+        //Debug.println(buf);
     
         JsonObject& root = jsonBuffer.parseObject(buf);
         if (!root.success()) {
             Debug.println("JSON parsing failed!");
             return;
         }
-        Debug.println((float)(root["actual"]));
-        Debug.println((float)(root["target"]));
+        //Debug.println((float)(root["actual"]));
+        //Debug.println((float)(root["target"]));
         updateExtTemperatures((float)(root["actual"]),(float)(root["target"]));
     } else if (!strcmp(topic, "oxtion/nexUpdate")) {
         //mqttUnsubscribe();
@@ -740,7 +739,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
 void wifiCallback() {
     getAPIConnectionState(0);
     //getAPIPrinterState(0);
-    getAPIJobState(0);
+    //getAPIJobState(0);
 }
 
 
@@ -825,13 +824,6 @@ void setup() {
     Debug.println("Initialization Finished.");
 }
 
-void mqttUnsubscribe() {
-    myESP.removeSubscription("octoprint/temperature/bed");
-    myESP.removeSubscription("octoprint/temperature/tool0");
-    myESP.removeSubscription("oxtion/nexUpdate");
-    myESP.removeSubscription("oxtion/estimate");
-    myESP.removeSubscription("octoprint/event/#");  
-}
 
 void loop(){
     myESP.loop();  //run the loop() method as often as possible - this keeps the network services running
