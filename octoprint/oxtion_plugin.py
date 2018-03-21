@@ -1,12 +1,46 @@
 import octoprint.plugin
 
-class OxtionPlugin(octoprint.plugin.StartupPlugin,octoprint.plugin.EventHandlerPlugin):
+class OxtionPlugin(octoprint.plugin.StartupPlugin,octoprint.plugin.EventHandlerPlugin,octoprint.plugin.SimpleApiPlugin):
 	_repeat_timer = None
 
 	def __init__(self):
 		self.mqtt_publish = lambda *args, **kwargs: None
 		self.mqtt_subscribe = lambda *args, **kwargs: None
 		self.mqtt_unsubscribe = lambda *args, **kwargs: None
+
+	def get_api_commands(self):
+		return dict(dummy=[])
+
+	def on_api_get(self, request):
+		from flask import jsonify
+		from octoprint.server import fileManager
+		import octoprint.filemanager
+		import octoprint.filemanager.util
+		import octoprint.filemanager.storage
+		from octoprint.filemanager import FileDestinations
+
+		req_path = "/"
+		if request.args.get('path'):
+			req_path = request.args.get('path')
+
+		if fileManager.folder_exists(FileDestinations.LOCAL, req_path):
+			files=fileManager.list_files(path=req_path, filter=None, recursive=False)
+
+			tmp_f = []
+			tmp_d = []
+			for f in files["local"]:
+				if files["local"][f]["type"] == "folder":
+					tmp_d.append(files["local"][f]["name"])
+				if files["local"][f]["type"] == "machinecode":
+					tmp_f.append(files["local"][f]["name"])
+
+			result = dict()
+			result["path"] = req_path
+			result["files"] = sorted(tmp_f, key=lambda s: s.lower())
+			result["directories"] = sorted(tmp_d, key=lambda s: s.lower())
+			
+			return jsonify(result)
+		return None
 
 	def on_after_startup(self):
 		helpers = self._plugin_manager.get_helpers("mqtt", "mqtt_publish", "mqtt_subscribe", "mqtt_unsubscribe")
