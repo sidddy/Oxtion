@@ -32,11 +32,25 @@ class OxtionPlugin(octoprint.plugin.StartupPlugin,octoprint.plugin.EventHandlerP
 				if files["local"][f]["type"] == "folder":
 					tmp_d.append(files["local"][f]["name"])
 				if files["local"][f]["type"] == "machinecode":
-					tmp_f.append(files["local"][f]["name"])
+					n = files["local"][f]["name"];
+					succ = "n/a";
+					if "history" in files["local"][f]:
+						history = files["local"][f]["history"]
+						last = None
+						for entry in history:
+							if not last or ("timestamp" in entry and "timestamp" in last and entry["timestamp"] > last["timestamp"]):
+								last = entry
+						if last:
+							if last["success"]:
+								succ = "succ";
+							else:
+								succ = "err";
+
+					tmp_f.append([n,succ])
 
 			result = dict()
 			result["path"] = req_path
-			result["files"] = sorted(tmp_f, key=lambda s: s.lower())
+			result["files"] = sorted(tmp_f, key=lambda s: s[0].lower())
 			result["directories"] = sorted(tmp_d, key=lambda s: s.lower())
 			
 			return jsonify(result)
