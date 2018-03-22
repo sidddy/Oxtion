@@ -22,6 +22,7 @@
 const char *stateString[OCTO_STATE_MAX+1] = { "Unknown", "Operational", "Offline", "Printing", "Operational", "Paused" };
 
 #define MAX_FILENAME_LEN 256
+#define MAX_FILE_COUNT 50
 
 #define BUTTON_CONNECT 11
 #define BUTTON_CANCEL 13
@@ -36,7 +37,7 @@ const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLE
                                                 {BUTTON_PAUSE, BUTTON_CANCEL},      //printing
                                                 {BUTTON_PRINT, BUTTON_DISABLED},    //loaded
                                                 {BUTTON_RESUME, BUTTON_CANCEL} };    //paused
-
+                                                
 
 // State variables, reflecting the current state determined via Octoprint API / MQTT
 int c_state = -1;
@@ -45,11 +46,15 @@ float temp_ext_tar = -1;
 float temp_bed_act = -1;
 float temp_bed_tar = -1;
 char job_file[MAX_FILENAME_LEN] = "";
-char path[MAX_FILENAME_LEN] = "";
+char c_folder[MAX_FILENAME_LEN] = "/misc/";
+int c_folder_pos = 0;
 float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
 int brightness = -1;
+
+DynamicJsonBuffer jsonFolderBuffer(1024);
+JsonObject* jsonFolderRoot;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -107,6 +112,13 @@ NexProgressBar nx_main_progress = NexProgressBar(1,19,"main.j0");
 NexButton nx_cancel_yes = NexButton(6,3,"cancel.b0");
 NexButton nx_cancel_no = NexButton(6,4,"cancel.b1");
 
+// File page
+NexButton nx_file_but_up = NexButton(4,6,"print.b5");
+NexButton nx_file_but_down = NexButton(4,7,"print.b6");
+NexText nx_file_loc = NexText(4,8,"print.t0");
+NexButton nx_file_lines[5] = { NexButton(4,9,"print.b7"), NexButton(4,10,"print.b8"), NexButton(4,11,"print.b9"), NexButton(4,12,"print.b10"), NexButton(4,13,"print.b11") };
+NexNumber nx_file_no_0 = NexNumber(4,14,"print.n0");
+NexNumber nx_file_no_1 = NexNumber(4,15,"print.n1");
 
 NexTouch *nex_listen_list[] = 
 {
@@ -134,6 +146,8 @@ NexTouch *nex_listen_list[] =
     &nx_main_button2,
     &nx_cancel_yes,
     &nx_cancel_no,
+    &nx_file_but_up,
+    &nx_file_but_down,
     NULL
 };
 
@@ -323,6 +337,34 @@ void updateBrightness(int br) {
     }
 }
 
+void updateFolder(int pos) {
+    int d_cnt = (*jsonFolderRoot)["directories"].size();
+    int f_cnt = (*jsonFolderRoot)["files"].size();
+    int lpos = 0;
+    
+    if (pos < 0)
+        pos = 0;
+    if (pos >= d_cnt + f_cnt)
+        pos = d_cnt + f_cnt - 1;
+    
+    c_folder_pos = pos;
+    
+    while (lpos < 5) {
+        if (pos+lpos < d_cnt) {
+            nx_file_lines[lpos].setText((*jsonFolderRoot)["directories"][pos+lpos]);
+        } else if (pos+lpos-d_cnt < f_cnt) {
+            nx_file_lines[lpos].setText((*jsonFolderRoot)["files"][pos+lpos-d_cnt][0]);
+        } else {
+            nx_file_lines[lpos].setText("");
+        }
+        lpos++;
+    }
+    
+    nx_file_no_0.setValue(pos+1);
+    nx_file_no_1.setValue(d_cnt+f_cnt);
+    
+}
+
 bool readAPIConnectionContent() {
     const size_t BUFFER_SIZE = 1024;
     
@@ -390,6 +432,21 @@ bool readAPIJobContent() {
     return true;
 }
 
+bool readAPIFolderContent() {
+    JsonObject& root = jsonFolderBuffer.parseObject(client);
+    if (!root.success()) {
+        Debug.println("JSON parsing failed!");
+        return false;
+    }
+    
+    root.printTo(Debug);
+    Debug.println("");
+    jsonFolderRoot = &root;
+    jsonFolderRoot->printTo(Debug);
+    Debug.println("");
+    updateFolder(0);
+}
+
 void disconnectAPI() {
     //Debug.println("Disconnect");
     client.stop();
@@ -416,13 +473,22 @@ void getAPIPrinterState(int) {
 }
 
 void getAPIJobState(int) {
-    if (c_state != OCTO_STATE_OFFLINE) {
-        if (connectAPI(server)) {
-            if (sendAPIRequest(server, "/api/job") && skipAPIResponseHeaders()) {
-                readAPIJobContent();
-            }
-            disconnectAPI();
+    if (connectAPI(server)) {
+        if (sendAPIRequest(server, "/api/job") && skipAPIResponseHeaders()) {
+            readAPIJobContent();
         }
+        disconnectAPI();
+    }
+}
+
+void getAPIFolderInfo(int) {
+    if (connectAPI(server)) {
+        char buf[MAX_FILENAME_LEN+20];
+        snprintf(buf,MAX_FILENAME_LEN+20,"api/plugin/oxtion_plugin?path=%s",c_folder);
+        if (sendAPIRequest(server, buf) && skipAPIResponseHeaders()) {
+            readAPIFolderContent();
+       }
+       disconnectAPI();
     }
 }
 
@@ -616,7 +682,8 @@ void nxMainPopCallback(void *ptr) {
             }                                                                                                                                                               
         }
     } else if (ptr == &nx_main_button2) {
-         Debug.println("main pop but2");
+        Debug.println("main pop but2");
+        getAPIFolderInfo(0);/*
         if (stateButtons[c_state][1] == BUTTON_CANCEL) {
             Debug.println("Main pop cancel");
             //sendCommand("page cancel");
@@ -624,7 +691,7 @@ void nxMainPopCallback(void *ptr) {
         } else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
             Debug.println("trying job api call");
             getAPIJobState(0);
-        }
+        }*/
     }
 }
 
@@ -644,6 +711,15 @@ void nxCancelPopCallback(void *ptr) {
            disconnectAPI();
         }
         sendCommand("page main");
+    }
+}
+
+void nxFilePopCallback(void *ptr) {
+    Debug.println("File pop callback");
+    if (ptr == &nx_file_but_up) {
+        updateFolder(c_folder_pos-4);
+    } else if (ptr == &nx_file_but_down) {
+        updateFolder(c_folder_pos+4);
     }
 }
 
@@ -740,7 +816,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
 void wifiCallback() {
     getAPIConnectionState(0);
     //getAPIPrinterState(0);
-    //getAPIJobState(0);
+    getAPIJobState(0);
 }
 
 
@@ -804,6 +880,9 @@ void setup() {
 
     nx_cancel_yes.attachPop(nxCancelPopCallback,&nx_cancel_yes);
     nx_cancel_no.attachPop(nxCancelPopCallback,&nx_cancel_no);
+    
+    nx_file_but_up.attachPop(nxFilePopCallback,&nx_file_but_up);
+    nx_file_but_down.attachPop(nxFilePopCallback,&nx_file_but_down);
     
     updateBrightness(50);
     updateBedTemperatures(0,0);
