@@ -28,6 +28,8 @@ class OxtionPlugin(octoprint.plugin.StartupPlugin,octoprint.plugin.EventHandlerP
 
 			tmp_f = []
 			tmp_d = []
+			if req_path != "/":
+				tmp_d = [".."]
 			for f in files["local"]:
 				if files["local"][f]["type"] == "folder":
 					tmp_d.append(files["local"][f]["name"])
