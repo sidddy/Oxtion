@@ -777,12 +777,10 @@ void nxMainCallback(void *ptr) {
             }                                                                                                                                                               
         }
     } else if (ptr == &nx_main_button2) {
-        Debug.println("main pop but2");
-        getAPIFolderInfo(c_folder);
-        /*
+        //Debug.println("main pop but2");
         if (stateButtons[c_state][1] == BUTTON_CANCEL) {
-            //sendCommand("page cancel");
-        }*/
+            sendCommand("page cancel");
+        }
         /*else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
             Debug.println("trying job api call");
             getAPIJobState(0);
