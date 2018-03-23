@@ -24,6 +24,8 @@ const char *stateString[OCTO_STATE_MAX+1] = { "Unknown", "Operational", "Offline
 #define MAX_FILENAME_LEN 256
 #define MAX_FILE_COUNT 100
 
+#define SLEEP_TIMEOUT 300*1000
+
 #define BUTTON_CONNECT 11
 #define BUTTON_CANCEL 13
 #define BUTTON_DISABLED 15
@@ -65,6 +67,7 @@ float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
 int brightness = -1;
+unsigned long last_button;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -134,6 +137,9 @@ NexButton nx_file_lines[5] = { NexButton(4,9,"print.b7"), NexButton(4,10,"print.
 NexNumber nx_file_no_0 = NexNumber(4,14,"print.n0");
 NexNumber nx_file_no_1 = NexNumber(4,15,"print.n1");
 
+// screensaver page
+NexPage nx_screensaver = NexPage(8,0,"screensaver");
+
 NexTouch *nex_listen_list[] = 
 {
     &nx_temp_update,
@@ -169,6 +175,7 @@ NexTouch *nex_listen_list[] =
     &nx_file_lines[2],
     &nx_file_lines[3],
     &nx_file_lines[4],
+    &nx_screensaver,
     NULL
 };
 
@@ -595,8 +602,7 @@ void getAPIFolderInfo(char* folder) {
 
 void nxTemperatureCallback(void *ptr)
 {
-  Debug.println("Variable callback executed!!");
-  // some target temp changed (extruder or bed), retreive both values
+  last_button = millis();
   uint32 bed_t;
   uint32 ext_t;
 
@@ -631,6 +637,7 @@ void nxTemperatureCallback(void *ptr)
 }
 
 void nxHomeCallback(void *ptr) {
+    last_button = millis();
     Debug.println("nxHomeCallback called.");
     if (ptr == &nx_move_home) {
         Debug.println("Home button pressed.");
@@ -665,6 +672,8 @@ void nxHomeCallback(void *ptr) {
 void nxMoveCallback(void *ptr) {
     uint32 val;
     char *step = NULL;
+    
+    last_button = millis();
     
     Debug.println("nxMoveCallback called.");
     
@@ -747,6 +756,7 @@ void nxMoveCallback(void *ptr) {
 }
 
 void nxLedCallback(void *ptr) {
+    last_button = millis();
     if (ptr == &nx_led_br_minus) {
         updateBrightness(brightness-10);
     } else  if (ptr == &nx_led_br_plus) {
@@ -769,6 +779,7 @@ void nxLedCallback(void *ptr) {
 }
 
 void nxMainCallback(void *ptr) {
+    last_button = millis();
     Debug.println("main pop");
     if (ptr == &nx_main_button1) {
          Debug.println("main pop but1");
@@ -805,6 +816,7 @@ void nxMainCallback(void *ptr) {
 }
 
 void nxCancelCallback(void *ptr) {
+    last_button = millis();
     if (ptr == &nx_cancel_no) {
         sendCommand("page main");
     } else if (ptr == &nx_cancel_yes) {
@@ -817,6 +829,7 @@ void nxCancelCallback(void *ptr) {
 }
 
 void nxPauseCallback(void *ptr) {
+    last_button = millis();
     if (ptr == &nx_pause_no) {
         sendCommand("page main");
     } else if (ptr == &nx_pause_yes) {
@@ -829,6 +842,7 @@ void nxPauseCallback(void *ptr) {
 }
 
 void nxFileCallback(void *ptr) {
+    last_button = millis();
     Debug.println("File pop callback");
     if (ptr == &nx_file_but_up) {
         updateFolder(c_folder_pos-4);
@@ -879,6 +893,12 @@ void nxFileCallback(void *ptr) {
     }
 }
 
+void nxScreensaverCallback(void *ptr) {
+    last_button = millis();
+    sendCommand("page main");
+    sendCommand("dim=100");
+}
+
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     const size_t BUFFER_SIZE = 1024;
     
@@ -918,7 +938,6 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         //Debug.println((float)(root["target"]));
         updateExtTemperatures((float)(root["actual"]),(float)(root["target"]));
     } else if (!strcmp(topic, "oxtion/nexUpdate")) {
-        //mqttUnsubscribe();
         startNextionOTA(nx_ota_url);
     } else if (!strcmp(topic, "octoprint/event/Connected")) {
         if (strlen(job_file)>0) {
@@ -986,6 +1005,11 @@ void timerTask(int) {
     if (c_state == OCTO_STATE_PRINTING) {
         updateJobDetails(job_file, job_completion, job_time+1, job_time_left-1);
     }
+    if ((last_button != 0) && ((millis() - last_button) > SLEEP_TIMEOUT)) {
+        sendCommand("page screensaver");
+        sendCommand("dim=0");
+        last_button = 0;
+    }
 }
 
 
@@ -1008,7 +1032,10 @@ void setup() {
     myESP.addSubscription("octoprint/temperature/bed");
     myESP.addSubscription("octoprint/temperature/tool0");
     myESP.addSubscription("oxtion/#");
-    myESP.addSubscription("octoprint/event/#");    
+    myESP.addSubscription("octoprint/event/#");
+    
+    //myESP.addSubscription("oxtion/nexUpdate");
+    
     
     myESP.setMQTTCallback(mqttCallback);
     myESP.setWifiCallback(wifiCallback);
@@ -1059,6 +1086,8 @@ void setup() {
     }
     nx_file_loc.setText("");
     
+    nx_screensaver.attachPop(nxScreensaverCallback, &nx_screensaver);
+    
     updateBrightness(50);
     updateBedTemperatures(0,0);
     updateExtTemperatures(0,0);
@@ -1080,6 +1109,8 @@ void setup() {
     }
     
     octoTasker.setInterval(timerTask, 1000);
+    
+    last_button = millis();
     
     Debug.println("Initialization Finished.");
 }
