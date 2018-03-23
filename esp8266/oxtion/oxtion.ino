@@ -22,7 +22,7 @@
 const char *stateString[OCTO_STATE_MAX+1] = { "Unknown", "Operational", "Offline", "Printing", "Operational", "Paused" };
 
 #define MAX_FILENAME_LEN 256
-#define MAX_FILE_COUNT 50
+#define MAX_FILE_COUNT 100
 
 #define BUTTON_CONNECT 11
 #define BUTTON_CANCEL 13
@@ -38,6 +38,18 @@ const int stateButtons[OCTO_STATE_MAX+1][2] = { {BUTTON_DISABLED, BUTTON_DISABLE
                                                 {BUTTON_PRINT, BUTTON_DISABLED},    //loaded
                                                 {BUTTON_RESUME, BUTTON_CANCEL} };    //paused
                                                 
+                         
+typedef struct {
+    char* name;
+    short success;
+} file_entry_t;
+                         
+typedef struct {
+    char* directories[MAX_FILE_COUNT];
+    file_entry_t files[MAX_FILE_COUNT];
+    uint dir_count;
+    uint file_count;
+} folder_t;
 
 // State variables, reflecting the current state determined via Octoprint API / MQTT
 int c_state = -1;
@@ -46,15 +58,13 @@ float temp_ext_tar = -1;
 float temp_bed_act = -1;
 float temp_bed_tar = -1;
 char job_file[MAX_FILENAME_LEN] = "";
-char c_folder[MAX_FILENAME_LEN] = "/misc/";
+char c_folder[MAX_FILENAME_LEN] = "/";
 int c_folder_pos = 0;
+folder_t c_folder_content;
 float job_completion = -1;
 int job_time = -1;
 int job_time_left = -1;
 int brightness = -1;
-
-DynamicJsonBuffer jsonFolderBuffer(1024);
-JsonObject* jsonFolderRoot;
 
 ESPHelper myESP(&homeNet);
 WiFiClient client;
@@ -112,6 +122,10 @@ NexProgressBar nx_main_progress = NexProgressBar(1,19,"main.j0");
 NexButton nx_cancel_yes = NexButton(6,3,"cancel.b0");
 NexButton nx_cancel_no = NexButton(6,4,"cancel.b1");
 
+// Pause page
+NexButton nx_pause_yes = NexButton(7,3,"pause.b0");
+NexButton nx_pause_no = NexButton(7,4,"pause.b1");
+
 // File page
 NexButton nx_file_but_up = NexButton(4,6,"print.b5");
 NexButton nx_file_but_down = NexButton(4,7,"print.b6");
@@ -146,8 +160,15 @@ NexTouch *nex_listen_list[] =
     &nx_main_button2,
     &nx_cancel_yes,
     &nx_cancel_no,
+    &nx_pause_yes,
+    &nx_pause_no,
     &nx_file_but_up,
     &nx_file_but_down,
+    &nx_file_lines[0],
+    &nx_file_lines[1],
+    &nx_file_lines[2],
+    &nx_file_lines[3],
+    &nx_file_lines[4],
     NULL
 };
 
@@ -288,40 +309,48 @@ void updateBedTemperatures(float act, float tar) {
 }
 
 void updateJobDetails(const char* file, float comp, int time, int time_left) {
-    //Debug.print("Job file: ");
-    //Debug.println(file);
     if ((strlen(file)>0) && (c_state == OCTO_STATE_STANDBY)) {
         updateConnectionState(OCTO_STATE_LOADED);
     }
     if (strcmp(file, job_file)) {
-      //  Debug.print("New Job: ");
-      //  Debug.println(file);
         strncpy(job_file, file, MAX_FILENAME_LEN);
         nx_main_file.setText(file);
     }
-    job_completion = comp;
-    job_time = time;
-    job_time_left = time_left;
     
     char buf[20];
-    snprintf(buf,20,"%d.%02d%%",(int)(job_completion),((int)(job_completion*100))%100);
-    nx_main_compl.setText(buf);
-    nx_main_progress.setValue((int)(job_completion));
-    
     int h,m,s;
-    h = (int)(time/3600);
-    m = (int)((time-h*3600)/60);
-    s = time-h*3600-m*60;
     
-    snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
-    nx_main_time.setText(buf);
+    if (comp != job_completion) {
+        job_completion = comp;
+        snprintf(buf,20,"%d.%02d%%",(int)(job_completion),((int)(job_completion*100))%100);
+        nx_main_compl.setText(buf);
+        nx_main_progress.setValue((int)(job_completion));
+    }
     
-    h = (int)(time_left/3600);
-    m = (int)((time_left-h*3600)/60);
-    s = time_left-h*3600-m*60;
+    if (job_time != time) {
+        job_time = time;
+        h = (int)(time/3600);
+        m = (int)((time-h*3600)/60);
+        s = time-h*3600-m*60;
     
-    snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
-    nx_main_left.setText(buf);
+        snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
+        nx_main_time.setText(buf);
+    }
+    
+    if (time_left < 0) {
+        time_left = 0;
+    }
+    
+    if (job_time_left != time_left) {
+        job_time_left = time_left;
+    
+        h = (int)(time_left/3600);
+        m = (int)((time_left-h*3600)/60);
+        s = time_left-h*3600-m*60;
+    
+        snprintf(buf,20,"%02d:%02d:%02d",h,m,s);
+        nx_main_left.setText(buf);
+    }
 }
 
 void updateBrightness(int br) {
@@ -338,9 +367,10 @@ void updateBrightness(int br) {
 }
 
 void updateFolder(int pos) {
-    int d_cnt = (*jsonFolderRoot)["directories"].size();
-    int f_cnt = (*jsonFolderRoot)["files"].size();
+    int d_cnt = c_folder_content.dir_count;
+    int f_cnt = c_folder_content.file_count;
     int lpos = 0;
+    char buf[128];
     
     if (pos < 0)
         pos = 0;
@@ -351,9 +381,30 @@ void updateFolder(int pos) {
     
     while (lpos < 5) {
         if (pos+lpos < d_cnt) {
-            nx_file_lines[lpos].setText((*jsonFolderRoot)["directories"][pos+lpos]);
+            snprintf(buf,128,"print.b%d.pco=BLACK", lpos+7);
+            sendCommand(buf);
+            snprintf(buf,128,"print.b%d.pco2=BLACK", lpos+7);
+            sendCommand(buf);
+            snprintf(buf,128,"<DIR> %s",c_folder_content.directories[pos+lpos]);
+            nx_file_lines[lpos].setText(buf);
         } else if (pos+lpos-d_cnt < f_cnt) {
-            nx_file_lines[lpos].setText((*jsonFolderRoot)["files"][pos+lpos-d_cnt][0]);
+            if (c_folder_content.files[pos+lpos-d_cnt].success == 1) {
+                snprintf(buf,128,"print.b%d.pco=GREEN", lpos+7); //TBD
+                sendCommand(buf);
+                snprintf(buf,128,"print.b%d.pco2=GREEN", lpos+7);
+                sendCommand(buf);
+            } else if (c_folder_content.files[pos+lpos-d_cnt].success == -1) {
+                snprintf(buf,128,"print.b%d.pco=RED", lpos+7);
+                sendCommand(buf);
+                snprintf(buf,128,"print.b%d.pco2=RED", lpos+7);
+                sendCommand(buf);
+           } else {
+                snprintf(buf,128,"print.b%d.pco=BLACK", lpos+7);
+                sendCommand(buf);
+                snprintf(buf,128,"print.b%d.pco2=BLACK", lpos+7);
+                sendCommand(buf);
+           }
+            nx_file_lines[lpos].setText(c_folder_content.files[pos+lpos-d_cnt].name);
         } else {
             nx_file_lines[lpos].setText("");
         }
@@ -362,7 +413,9 @@ void updateFolder(int pos) {
     
     nx_file_no_0.setValue(pos+1);
     nx_file_no_1.setValue(d_cnt+f_cnt);
-    
+
+    snprintf(buf,128,"Location: %s",c_folder); 
+    nx_file_loc.setText(buf);
 }
 
 bool readAPIConnectionContent() {
@@ -433,17 +486,62 @@ bool readAPIJobContent() {
 }
 
 bool readAPIFolderContent() {
+    
+    DynamicJsonBuffer jsonFolderBuffer(1024);
     JsonObject& root = jsonFolderBuffer.parseObject(client);
+    
     if (!root.success()) {
         Debug.println("JSON parsing failed!");
+        root.printTo(Debug);
+        Debug.println("");
         return false;
     }
     
-    root.printTo(Debug);
+  /*  root.printTo(Debug);
     Debug.println("");
     jsonFolderRoot = &root;
     jsonFolderRoot->printTo(Debug);
-    Debug.println("");
+    Debug.println("");*/
+  
+    // clean up old folder data
+    c_folder_content.dir_count = 0;
+    c_folder_content.file_count = 0;
+    for (int i=0; i<MAX_FILE_COUNT; i++) {
+        if (c_folder_content.directories[i] != NULL) {
+            free(c_folder_content.directories[i]);
+            c_folder_content.directories[i] = NULL;
+        }
+        if (c_folder_content.files[i].name != NULL) {
+            free(c_folder_content.files[i].name);
+            c_folder_content.files[i].name = NULL;
+        }
+        c_folder_content.files[i].success = 0;
+    }
+    
+    // build new folder data
+     
+    c_folder_content.dir_count = (root["directories"].size()<=MAX_FILE_COUNT)?root["directories"].size():100;
+    c_folder_content.file_count = (root["files"].size()<=MAX_FILE_COUNT)?root["files"].size():100;
+    
+    for (int i=0; i < c_folder_content.dir_count; i++) {
+        const char* dir = root["directories"][i];
+        c_folder_content.directories[i] = (char*) malloc(strlen(dir)+1);
+        strcpy(c_folder_content.directories[i],dir);
+    }
+    for (int i=0; i < c_folder_content.file_count; i++) {
+        const char* file = root["files"][i][0];
+        const char* succ = root["files"][i][1];
+        c_folder_content.files[i].name = (char*) malloc(strlen(file)+1);
+        strcpy(c_folder_content.files[i].name,file);
+        if (strcmp(succ,"succ") == 0) {
+            c_folder_content.files[i].success = 1;
+        } else if (strcmp(succ,"err") == 0) {
+            c_folder_content.files[i].success = -1;
+        } else c_folder_content.files[i].success = 0;
+    }
+    
+    strncpy(c_folder,root["path"],MAX_FILENAME_LEN);
+  
     updateFolder(0);
 }
 
@@ -481,10 +579,10 @@ void getAPIJobState(int) {
     }
 }
 
-void getAPIFolderInfo(int) {
+void getAPIFolderInfo(char* folder) {
     if (connectAPI(server)) {
         char buf[MAX_FILENAME_LEN+20];
-        snprintf(buf,MAX_FILENAME_LEN+20,"api/plugin/oxtion_plugin?path=%s",c_folder);
+        snprintf(buf,MAX_FILENAME_LEN+20,"/api/plugin/oxtion_plugin?path=%s",folder);
         if (sendAPIRequest(server, buf) && skipAPIResponseHeaders()) {
             readAPIFolderContent();
        }
@@ -654,7 +752,7 @@ void nxLedCallback(void *ptr) {
     }
 }
 
-void nxMainPopCallback(void *ptr) {
+void nxMainCallback(void *ptr) {
     Debug.println("main pop");
     if (ptr == &nx_main_button1) {
          Debug.println("main pop but1");
@@ -666,10 +764,7 @@ void nxMainPopCallback(void *ptr) {
                 disconnectAPI();
             }
         } else if (stateButtons[c_state][0] == BUTTON_PAUSE) {
-            if (connectAPI(server)) {                                                                                                                                       
-                postAPICommand(server, "/api/job", "{\"command\": \"pause\", \"action\": \"pause\" }");
-                disconnectAPI();                                                                                                                                            
-            }
+            sendCommand("page pause");
         } else if (stateButtons[c_state][0] == BUTTON_RESUME) {
             if (connectAPI(server)) {
                 postAPICommand(server, "/api/job", "{\"command\": \"pause\", \"action\": \"resume\" }");
@@ -683,43 +778,90 @@ void nxMainPopCallback(void *ptr) {
         }
     } else if (ptr == &nx_main_button2) {
         Debug.println("main pop but2");
-        getAPIFolderInfo(0);/*
+        getAPIFolderInfo(c_folder);
+        /*
         if (stateButtons[c_state][1] == BUTTON_CANCEL) {
-            Debug.println("Main pop cancel");
             //sendCommand("page cancel");
-            getAPIJobState(0);
-        } else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
+        }*/
+        /*else if (stateButtons[c_state][1] == BUTTON_DISABLED) {
             Debug.println("trying job api call");
             getAPIJobState(0);
         }*/
     }
 }
 
-void nxMainPushCallback(void *ptr) {
-    Debug.println("main push");
-    if ((ptr == &nx_main_button2) && (stateButtons[c_state][1] == BUTTON_CANCEL)) {
-        Debug.println("Main push cancel");
-    } //TBD
-}
-
-void nxCancelPopCallback(void *ptr) {
+void nxCancelCallback(void *ptr) {
     if (ptr == &nx_cancel_no) {
         sendCommand("page main");
     } else if (ptr == &nx_cancel_yes) {
         if (connectAPI(server)) {
             postAPICommand(server, "/api/job", "{\"command\": \"cancel\" }");
-           disconnectAPI();
+            disconnectAPI();
         }
         sendCommand("page main");
     }
 }
 
-void nxFilePopCallback(void *ptr) {
+void nxPauseCallback(void *ptr) {
+    if (ptr == &nx_pause_no) {
+        sendCommand("page main");
+    } else if (ptr == &nx_pause_yes) {
+        if (connectAPI(server)) {
+            postAPICommand(server, "/api/job", "{\"command\": \"pause\", \"action\": \"pause\" }");
+            disconnectAPI();
+        }
+        sendCommand("page main");
+    }
+}
+
+void nxFileCallback(void *ptr) {
     Debug.println("File pop callback");
     if (ptr == &nx_file_but_up) {
         updateFolder(c_folder_pos-4);
     } else if (ptr == &nx_file_but_down) {
         updateFolder(c_folder_pos+4);
+    } else {
+        for (int i=0; i<5; i++) {
+            if (ptr == &nx_file_lines[i]) {
+             //TBD  c_folder_pos 
+               int pos = c_folder_pos + i;
+               int d_cnt = c_folder_content.dir_count;
+               int f_cnt = c_folder_content.file_count;
+               if (pos < d_cnt) {
+                   // a directory was selected
+                   char* dir = c_folder_content.directories[pos];
+                   if (strcmp(dir,"..")==0) {
+                       char folder[MAX_FILENAME_LEN];
+                       strcpy(folder,c_folder);
+                       for (int i=strlen(folder)-2; i>=0; i--) {
+                          if (folder[i] == '/') {
+                              folder[i+1] = '\0';
+                              getAPIFolderInfo(folder);
+                              break;
+                          }
+                       }
+                   } else {
+                      char folder[MAX_FILENAME_LEN];
+                      snprintf(folder,MAX_FILENAME_LEN,"%s%s/",c_folder,dir);
+                      getAPIFolderInfo(folder);
+                  }
+               } else {
+                    // file was selected
+                    pos = pos - d_cnt;
+                    if (pos < f_cnt) {
+                       const char* fn = c_folder_content.files[pos].name;
+                       char buf[3*MAX_FILENAME_LEN];
+                       snprintf(buf,3*MAX_FILENAME_LEN,"/api/files/local%s%s",c_folder,fn);
+                       Debug.println(buf); 
+                       if (connectAPI(server)) { 
+                           postAPICommand(server, buf, "{\"command\": \"select\" }");
+                           disconnectAPI();
+                       }
+                   }
+               }
+               break;
+            }
+        }
     }
 }
 
@@ -809,6 +951,11 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
             return;
         }
         updateJobDetails(job_file, (float)root["progress"], (int)root["printtime"], (int)root["printtimeleft"]);
+    }  else if (!strcmp(topic, "oxtion/startup")) {
+        // Octoprint just started up. lets get its current state.
+        getAPIConnectionState(0);
+        getAPIJobState(0);
+        getAPIFolderInfo("/");
     }
     
 }
@@ -817,6 +964,14 @@ void wifiCallback() {
     getAPIConnectionState(0);
     //getAPIPrinterState(0);
     getAPIJobState(0);
+    getAPIFolderInfo("/");
+}
+
+
+void timerTask(int) {
+    if (c_state == OCTO_STATE_PRINTING) {
+        updateJobDetails(job_file, job_completion, job_time+1, job_time_left-1);
+    }
 }
 
 
@@ -838,8 +993,7 @@ void setup() {
     
     myESP.addSubscription("octoprint/temperature/bed");
     myESP.addSubscription("octoprint/temperature/tool0");
-    myESP.addSubscription("oxtion/nexUpdate");
-    myESP.addSubscription("oxtion/estimate");
+    myESP.addSubscription("oxtion/#");
     myESP.addSubscription("octoprint/event/#");    
     
     myESP.setMQTTCallback(mqttCallback);
@@ -873,16 +1027,23 @@ void setup() {
     nx_led_mode_5.attachPop(nxLedCallback,&nx_led_mode_5);
     nx_led_mode_6.attachPop(nxLedCallback,&nx_led_mode_6);
     
-    nx_main_button1.attachPop(nxMainPopCallback,&nx_main_button1);
-    nx_main_button2.attachPop(nxMainPopCallback,&nx_main_button2);
-    //nx_main_button1.attachPush(nxMainPushCallback,&nx_main_button1);
-    //nx_main_button2.attachPush(nxMainPushCallback,&nx_main_button2);
+    nx_main_button1.attachPop(nxMainCallback,&nx_main_button1);
+    nx_main_button2.attachPop(nxMainCallback,&nx_main_button2);
 
-    nx_cancel_yes.attachPop(nxCancelPopCallback,&nx_cancel_yes);
-    nx_cancel_no.attachPop(nxCancelPopCallback,&nx_cancel_no);
+    nx_cancel_yes.attachPop(nxCancelCallback,&nx_cancel_yes);
+    nx_cancel_no.attachPop(nxCancelCallback,&nx_cancel_no);
     
-    nx_file_but_up.attachPop(nxFilePopCallback,&nx_file_but_up);
-    nx_file_but_down.attachPop(nxFilePopCallback,&nx_file_but_down);
+    nx_pause_yes.attachPop(nxPauseCallback,&nx_pause_yes);
+    nx_pause_no.attachPop(nxPauseCallback,&nx_pause_no);
+    
+    
+    nx_file_but_up.attachPop(nxFileCallback,&nx_file_but_up);
+    nx_file_but_down.attachPop(nxFileCallback,&nx_file_but_down);
+    for (int i=0; i<5; i++) {
+        nx_file_lines[i].attachPop(nxFileCallback,&nx_file_lines[i]);
+        nx_file_lines[i].setText("");
+    }
+    nx_file_loc.setText("");
     
     updateBrightness(50);
     updateBedTemperatures(0,0);
@@ -896,10 +1057,15 @@ void setup() {
     nx_main_left.setText("");
     sendCommand("page main");
     
+    c_folder_content.dir_count = 0;
+    c_folder_content.file_count = 0;
+    for (int i=0; i<MAX_FILE_COUNT; i++) {
+        c_folder_content.directories[i] = NULL;
+        c_folder_content.files[i].name = NULL;
+        c_folder_content.files[i].success = 0;
+    }
     
-   //octoTasker.setInterval(getAPIConnectionState, 5000);
-   //octoTasker.setInterval(getAPIPrinterState, 5000); 
-   //octoTasker.setInterval(getAPIJobState, 5000); 
+    octoTasker.setInterval(timerTask, 1000);
     
     Debug.println("Initialization Finished.");
 }
