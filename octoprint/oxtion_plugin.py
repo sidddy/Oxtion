@@ -70,10 +70,11 @@ class OxtionPlugin(octoprint.plugin.StartupPlugin,octoprint.plugin.EventHandlerP
 
 		self.mqtt_publish("oxtion/misc", "Oxtion plugin startup")
 		self._logger.info("Oxtion Plugin started.")
+		self.mqtt_publish("oxtion/startup", "startup")
 
 	def on_event(self, event, payload):
 		if event == "PrintStarted":
-			self._repeat_timer = octoprint.util.RepeatedTimer(15, self.send_progress)
+			self._repeat_timer = octoprint.util.RepeatedTimer(60, self.send_progress)
 			self._repeat_timer.start()
 			self._logger.info("Oxtion Plugin progress reporting started.")  
 		if event in ["PrintFailed", "PrintDone"] :
