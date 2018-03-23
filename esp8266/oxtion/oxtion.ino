@@ -363,6 +363,9 @@ void updateBrightness(int br) {
     if (br != brightness) {
         brightness = br;
         nx_led_brightness.setValue(brightness);
+        char buf[10];
+        snprintf(buf,10,"%d",(int)((brightness*255)/100));
+        myESP.publish("octoled/brightness",buf);
     }
 }
 
@@ -746,10 +749,23 @@ void nxMoveCallback(void *ptr) {
 void nxLedCallback(void *ptr) {
     if (ptr == &nx_led_br_minus) {
         updateBrightness(brightness-10);
-    }
-    if (ptr == &nx_led_br_plus) {
+    } else  if (ptr == &nx_led_br_plus) {
         updateBrightness(brightness+10);
-    }
+    } else if (ptr == &nx_led_mode_0) {
+        myESP.publish("octoled/mode","0");
+    } else if (ptr == &nx_led_mode_1) {
+        myESP.publish("octoled/mode","1");
+    } else if (ptr == &nx_led_mode_2) {
+        myESP.publish("octoled/mode","2");
+    } else if (ptr == &nx_led_mode_3) {
+        myESP.publish("octoled/mode","3");
+    } else if (ptr == &nx_led_mode_4) {
+        myESP.publish("octoled/mode","4");
+    } else if (ptr == &nx_led_mode_5) {
+        myESP.publish("octoled/mode","5");
+    } else if (ptr == &nx_led_mode_6) {
+        myESP.publish("octoled/mode","6");
+    } 
 }
 
 void nxMainCallback(void *ptr) {
