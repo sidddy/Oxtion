@@ -140,6 +140,9 @@ NexNumber nx_file_no_1 = NexNumber(4,15,"print.n1");
 // screensaver page
 NexPage nx_screensaver = NexPage(8,0,"screensaver");
 
+// startup page
+NexPage nx_startup = NexPage(0,0,"startup");
+
 NexTouch *nex_listen_list[] = 
 {
     &nx_temp_update,
@@ -176,6 +179,7 @@ NexTouch *nex_listen_list[] =
     &nx_file_lines[3],
     &nx_file_lines[4],
     &nx_screensaver,
+    &nx_startup,
     NULL
 };
 
@@ -899,6 +903,12 @@ void nxScreensaverCallback(void *ptr) {
     sendCommand("dim=100");
 }
 
+void nxStartupCallback(void *ptr) {
+    // uww... if we end up here, the Nextion device crashed and the user touched the display on the startup page. Go to main page (current display state will be lost...)
+    last_button = millis();
+    sendCommand("page main");
+}
+
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
     const size_t BUFFER_SIZE = 1024;
     
@@ -1007,7 +1017,7 @@ void timerTask(int) {
     }
     if ((last_button != 0) && ((millis() - last_button) > SLEEP_TIMEOUT)) {
         sendCommand("page screensaver");
-        sendCommand("dim=0");
+        sendCommand("dim=1");
         last_button = 0;
     }
 }
@@ -1087,6 +1097,7 @@ void setup() {
     nx_file_loc.setText("");
     
     nx_screensaver.attachPop(nxScreensaverCallback, &nx_screensaver);
+    nx_startup.attachPop(nxStartupCallback, &nx_startup);
     
     updateBrightness(50);
     updateBedTemperatures(0,0);
@@ -1099,6 +1110,8 @@ void setup() {
     nx_main_time.setText("");
     nx_main_left.setText("");
     sendCommand("page main");
+    sendCommand("dim=100");
+    
     
     c_folder_content.dir_count = 0;
     c_folder_content.file_count = 0;
