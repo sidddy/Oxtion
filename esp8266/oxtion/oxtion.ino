@@ -1027,6 +1027,9 @@ void setup() {
     
     //Serial.begin(115200);	//start the serial line
     //delay(500);
+    pinMode(D1, OUTPUT);  
+    digitalWrite(D1, HIGH);
+    delay(500);
 
     Debug.begin("oxtion");
     //Debug.setSerialEnabled(true);
