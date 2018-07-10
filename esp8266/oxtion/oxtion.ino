@@ -386,10 +386,19 @@ void updateFolder(int pos) {
     int lpos = 0;
     char buf[128];
     
+    if ((d_cnt == 0) && (f_cnt == 0)) {
+        for (int i=0; i<5; i++) {
+          nx_file_lines[i].setText("");
+        }
+        return;
+    }
+    
     if (pos < 0)
         pos = 0;
     if (pos >= d_cnt + f_cnt)
         pos = d_cnt + f_cnt - 1;
+    
+    
     
     c_folder_pos = pos;
     
@@ -849,7 +858,11 @@ void nxFileCallback(void *ptr) {
     last_button = millis();
     Debug.println("File pop callback");
     if (ptr == &nx_file_but_up) {
-        updateFolder(c_folder_pos-4);
+        if (c_folder_pos == 0) {
+            getAPIFolderInfo(c_folder);
+        } else {
+            updateFolder(c_folder_pos-4);
+        }
     } else if (ptr == &nx_file_but_down) {
         updateFolder(c_folder_pos+4);
     } else {
