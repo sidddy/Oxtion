@@ -1035,6 +1035,13 @@ void timerTask(int) {
     }
 }
 
+void unsubscribe() {
+    myESP.removeSubscription("octoprint/temperature/bed");
+    myESP.removeSubscription("octoprint/temperature/tool0");
+    myESP.removeSubscription("oxtion/#");
+    myESP.removeSubscription("octoprint/event/#");
+}
+
 
 void setup() {
     
@@ -1161,6 +1168,8 @@ void loop(){
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Upload firmware to the Nextion LCD
 void startNextionOTA (String otaURL) {
+  // unsuscribe from all MQTT topicvs first... wifi traffic makes this process unstable
+  unsubscribe();
   // based in large part on code posted by indev2 here:
   // http://support.iteadstudio.com/support/discussions/topics/11000007686/page/2
   byte nextionSuffix[] = {0xFF, 0xFF, 0xFF};
@@ -1174,25 +1183,25 @@ void startNextionOTA (String otaURL) {
   int total = 0;
   int pCent = 0;
 
-  Debug.println("LCD OTA: Attempting firmware download from:" + otaURL);
+  //Debug.println("LCD OTA: Attempting firmware download from:" + otaURL);
   HTTPClient http;
   http.begin(otaURL);
   int httpCode = http.GET();
   if (httpCode > 0) {
     // HTTP header has been send and Server response header has been handled
-    Debug.println("LCD OTA: HTTP GET return code:" + String(httpCode));
+    //Debug.println("LCD OTA: HTTP GET return code:" + String(httpCode));
     if (httpCode == HTTP_CODE_OK) { // file found at server
       // get length of document (is -1 when Server sends no Content-Length header)
       int len = http.getSize();
       FileSize = len;
       int Parts = (len / 4096) + 1;
-      Debug.println("LCD OTA: File found at Server. Size " + String(len) + " bytes in " + String(Parts) + " 4k chunks.");
+      //Debug.println("LCD OTA: File found at Server. Size " + String(len) + " bytes in " + String(Parts) + " 4k chunks.");
       // create buffer for read
       uint8_t buff[128] = {};
       // get tcp stream
       WiFiClient * stream = http.getStreamPtr();
 
-      Debug.println("LCD OTA: Issuing NULL command");
+      //Debug.println("LCD OTA: Issuing NULL command");
       Serial.write(nextionSuffix, sizeof(nextionSuffix));
       //handleNextionInput();
       delay(250);
@@ -1201,24 +1210,27 @@ void startNextionOTA (String otaURL) {
       }
 
       String nexcmd = "whmi-wri " + String(FileSize) + ",115200,0";
-      Debug.println("LCD OTA: Sending LCD upload command: " + nexcmd);
+      //Debug.println("LCD OTA: Sending LCD upload command: " + nexcmd);
       Serial.print(nexcmd);
       Serial.write(nextionSuffix, sizeof(nextionSuffix));
       Serial.flush();
 
       if (otaReturnSuccess()) {
-        Debug.println("LCD OTA: LCD upload command accepted");
+        //Debug.println("LCD OTA: LCD upload command accepted");
       }
       else {
-        Debug.println("LCD OTA: LCD upload command FAILED.");
+        //Debug.println("LCD OTA: LCD upload command FAILED.");
         return;
       }
-      Debug.println("LCD OTA: Starting update");
+      //Debug.println("LCD OTA: Starting update");
       while (http.connected() && (len > 0 || len == -1)) {
         yield();
         // get available data size
         size_t size = stream->available();
         if (size) {
+          if (count+size>4096) {
+              size = 4096 - count;
+          }
           // read up to 128 bytes
           int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
           // write it to Serial
@@ -1242,22 +1254,21 @@ void startNextionOTA (String otaURL) {
             len -= c;
           }
         }
-        //delay(1);
-        yield();
+
       }
       partNum++;
       //delay (250);
       total += count;
       if ((total == FileSize) && otaReturnSuccess()) {
-        Debug.println("LCD OTA: success, wrote " + String(total) + " of " + String(FileSize) + " bytes.");
+  //      Debug.println("LCD OTA: success, wrote " + String(total) + " of " + String(FileSize) + " bytes.");
       }
       else {
-        Debug.println("LCD OTA: failure");
+  //      Debug.println("LCD OTA: failure");
       }
     }
   }
   else {
-    Debug.println("LCD OTA: HTTP GET failed, error code " + http.errorToString(httpCode));
+ //   Debug.println("LCD OTA: HTTP GET failed, error code " + http.errorToString(httpCode));
   }
   http.end();
 }
