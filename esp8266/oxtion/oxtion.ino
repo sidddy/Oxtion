@@ -978,7 +978,7 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
         updateConnectionState(OCTO_STATE_PRINTING);
     } else if (!strcmp(topic, "octoprint/event/PrintPaused")) {
         updateConnectionState(OCTO_STATE_PAUSED);
-    } else if (!strcmp(topic, "octoprint/event/PrintFailed")) {
+    } else if ((!strcmp(topic, "octoprint/event/PrintFailed")) || (!strcmp(topic, "octoprint/event/PrintDone"))) {
         if (strlen(job_file)>0) {
             updateConnectionState(OCTO_STATE_LOADED);
         } else {
