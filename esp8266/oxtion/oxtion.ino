@@ -93,6 +93,9 @@ NexButton nx_move_y_u = NexButton(3,13,"b9");
 NexButton nx_move_y_d = NexButton(3,15,"b11");
 NexButton nx_move_z_u = NexButton(3,17,"b13");
 NexButton nx_move_z_d = NexButton(3,18,"b14");
+NexButton nx_move_e_u = NexButton(3,19,"b15");
+NexButton nx_move_e_d = NexButton(3,20,"b16");
+
 
 NexDSButton nx_move_0_1 = NexDSButton(3,6,"bt0");
 NexDSButton nx_move_1 = NexDSButton(3,7,"bt1");
@@ -156,6 +159,8 @@ NexTouch *nex_listen_list[] =
     &nx_move_y_d,
     &nx_move_z_u,
     &nx_move_z_d,
+    &nx_move_e_u,
+    &nx_move_e_d,
     &nx_led_br_minus,
     &nx_led_br_plus,
     &nx_led_mode_0,
@@ -766,6 +771,26 @@ void nxMoveCallback(void *ptr) {
             disconnectAPI();
         }
     }
+    if (ptr == &nx_move_e_u) {
+        //     { "command": "extrude", "amount": 5 }
+        Debug.println("Extruder Retract button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"command\":\"extrude\",\"amount\":-%s}", step);
+            postAPICommand(server, "/api/printer/tool", jsonCmd);
+            disconnectAPI();
+        }
+    }
+    if (ptr == &nx_move_e_d) {
+        //     { "command": "extrude", "amount": 5 }
+        Debug.println("Extruder Extrude button pressed.");
+        if (connectAPI(server)) {
+            char jsonCmd[256];
+            snprintf(jsonCmd, 256, "{\"command\":\"extrude\",\"amount\":%s}", step);
+            postAPICommand(server, "/api/printer/tool", jsonCmd);
+            disconnectAPI();
+        }
+    }
 }
 
 void nxLedCallback(void *ptr) {
@@ -1090,6 +1115,8 @@ void setup() {
     nx_move_y_u.attachPop(nxMoveCallback,&nx_move_y_u);
     nx_move_z_d.attachPop(nxMoveCallback,&nx_move_z_d);
     nx_move_z_u.attachPop(nxMoveCallback,&nx_move_z_u);
+    nx_move_e_u.attachPop(nxMoveCallback,&nx_move_e_u);
+    nx_move_e_d.attachPop(nxMoveCallback,&nx_move_e_d);
     
     nx_led_br_minus.attachPop(nxLedCallback,&nx_led_br_minus);
     nx_led_br_plus.attachPop(nxLedCallback,&nx_led_br_plus);
