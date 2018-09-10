@@ -23,6 +23,7 @@ const char *stateString[OCTO_STATE_MAX+1] = { "Unknown", "Operational", "Offline
 
 #define MAX_FILENAME_LEN 256
 #define MAX_FILE_COUNT 100
+#define BIG_FONT_LIMIT 29
 
 #define SLEEP_TIMEOUT 300*1000
 
@@ -331,6 +332,14 @@ void updateJobDetails(const char* file, float comp, int time, int time_left) {
     if (strcmp(file, job_file)) {
         strncpy(job_file, file, MAX_FILENAME_LEN);
         nx_main_file.setText(file);
+        if (strlen(file) > BIG_FONT_LIMIT) {
+            char buf[128];
+            nx_main_file.setFont(0);
+            sendCommand("main.t1.isbr=1");
+        } else {
+            nx_main_file.setFont(1);
+            sendCommand("main.t1.isbr=0");
+        }
     }
     
     char buf[20];
@@ -1050,7 +1059,7 @@ void wifiCallback() {
 }
 
 
-void timerTask(int) {
+void timerTask() {
     if (c_state == OCTO_STATE_PRINTING) {
         updateJobDetails(job_file, job_completion, job_time+1, job_time_left-1);
     }
